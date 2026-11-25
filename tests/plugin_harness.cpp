@@ -88,6 +88,14 @@ int main (int argc, char** argv)
     // 2. Play the "mix" from bar 65.
     play (argc > 2 ? std::atof (argv[2]) : 24.0, 1, 65);
 
+    // 3. Optionally keep the plugin alive so the MCP bridge can talk to it.
+    const double serveSeconds = argc > 3 ? std::atof (argv[3]) : 0.0;
+    if (serveSeconds > 0)
+    {
+        std::printf ("serving for %.0f s\n", serveSeconds); std::fflush (stdout);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil ((int) (serveSeconds * 1000));
+    }
+
     const auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
     juce::File out (argc > 1 ? argv[1] : "/tmp/kmf_ui.png");
     out.deleteFile();

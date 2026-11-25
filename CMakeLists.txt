@@ -52,6 +52,13 @@ target_link_libraries(KeecoMixFeedback
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
 
+# MCP bridge for the Claude desktop app (stdio server that talks to the plugin on 127.0.0.1).
+juce_add_console_app(KeecoMcpBridge PRODUCT_NAME "KeecoMcpBridge")
+target_sources(KeecoMcpBridge PRIVATE bridge/BridgeMain.cpp)
+target_compile_definitions(KeecoMcpBridge PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+target_link_libraries(KeecoMcpBridge PRIVATE juce::juce_core juce::juce_events
+    PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+
 # DSP unit tests (no JUCE needed): ctest after building.
 enable_testing()
 add_executable(kmf_dsp_tests tests/dsp_tests.cpp)

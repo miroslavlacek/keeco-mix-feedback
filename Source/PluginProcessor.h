@@ -2,12 +2,14 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "dsp/MixAnalyzer.h"
 #include "ReferenceStore.h"
+#include "McpLink.h"
 
-class KeecoMixFeedbackProcessor : public juce::AudioProcessor
+class KeecoMixFeedbackProcessor : public juce::AudioProcessor,
+                                  private juce::Timer
 {
 public:
     KeecoMixFeedbackProcessor();
-    ~KeecoMixFeedbackProcessor() override = default;
+    ~KeecoMixFeedbackProcessor() override;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
@@ -33,11 +35,9 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    // ---- used by the editor (UI thread) ----
+    // ---- used by the editor (message thread) ----
     kmf::MixAnalyzer& getAnalyzer() noexcept { return analyzer; }
     double getSampleRateForUi() const noexcept { return currentSampleRate.load(); }
-
-    // Copies the newest audio for the spectrum (lock-free FIFO, UI side).
     int readSpectrumAudio (float* left, float* right, int maxSamples);
 
     void applyReference (const StoredReference& r);
@@ -45,19 +45,49 @@ public:
     const StoredReference& getReference() const noexcept { return reference; }
     bool hasReference() const noexcept { return reference.profile.valid; }
 
-    // Section summaries collected this session (for copying / the AI layer).
-    juce::StringArray& getSummaries() noexcept { return summaries; }
+    void setMode (kmf::MasterMode m) { analyzer.setMode (m); }
+    kmf::MasterMode getMode() const noexcept { return analyzer.getMode(); }
+
+    // Log shown in the "Postrehy" panel: plugin rules, notes and Claude's insights.
+    enum class Source { rules, plugin, claude };
+    struct LogItem { kmf::Severity severity; int bar; double seconds; juce::String text; Source source; };
+    std::vector<LogItem> getLogNewestFirst (size_t maxItems) const;
+    void addNote (const juce::String& text, kmf::Severity s = kmf::Severity::info);
+    void clearLog();
+
+    int getSectionCount() const;
+    juce::String getSectionsJson (int fromBar = 0, int toBar = 1 << 30) const;
+
+    int getLinkPort() const noexcept { return link != nullptr ? link->getPort() : 0; }
+    int getLinkRequests() const noexcept { return link != nullptr ? link->getRequestCount() : 0; }
 
 private:
+    void timerCallback() override;               // drains the analyzer queues (message thread)
+    juce::String handleLinkRequest (const juce::String& json);   // MCP bridge (link thread)
+    juce::String statusJson() const;
+    void addLog (LogItem item);
+
     kmf::MixAnalyzer analyzer;
-    std::atomic<double> currentSampleRate { 48000.0 };
+    std::atomic<double> currentSampleRate { 48000.0 }, hostBpm { 0.0 };
+    std::atomic<int> hostSigNum { 4 }, hostSigDen { 4 };
+    std::atomic<bool> hostHasPosition { false };
+    bool wasPlaying = false;
 
     static constexpr int fifoSize = 1 << 15;
     juce::AbstractFifo spectrumFifo { fifoSize };
     juce::AudioBuffer<float> spectrumBuffer { 2, fifoSize };
 
     StoredReference reference;
-    juce::StringArray summaries;
+    juce::String referenceName;                  // copy readable from the link thread
+    juce::CriticalSection refLock;
+
+    struct SectionItem { int fromBar, toBar; juce::String json; };
+    mutable juce::CriticalSection logLock;
+    std::vector<LogItem> log;
+    std::vector<SectionItem> sections;
+
+    std::unique_ptr<McpLinkServer> link;
+    std::shared_ptr<std::atomic<bool>> alive = std::make_shared<std::atomic<bool>> (true);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (KeecoMixFeedbackProcessor)
 };

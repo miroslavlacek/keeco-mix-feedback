@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <vector>
 #include <cmath>
+#include <algorithm>
+#include <cstdlib>
 
 using namespace kmf;
 static int failures = 0;
@@ -24,7 +26,7 @@ static double integratedOfSine (double fs, double freq, double dbfs, double seco
     return m.getIntegrated();
 }
 
-int main()
+int main (int argc, char** argv)
 {
     // 1. EBU Tech 3341: stereo 1 kHz sine at -23 dBFS reads -23.0 LUFS (+-0.1).
     for (double fs : { 44100.0, 48000.0, 96000.0 })
@@ -172,6 +174,60 @@ int main()
         check (sp.getAverage()[(size_t) best] > -20.0 && sp.getAverage()[(size_t) best] < 1.0, "Sine level after 1/6-oct smoothing (spread)", sp.getAverage()[(size_t) best], -12.0);
         int p100 = 0; while (SpectrumAnalyzer::frequencyOf (p100) < 100) ++p100;
         check (sp.getAverage()[(size_t) p100] < -80.0, "Spectrum at 100 Hz far below", sp.getAverage()[(size_t) p100], -100.0);
+    }
+
+    // 9. Width contrast: 16 bars wide & quiet breakdown, then a loud mono drop -> one info alert at the drop.
+    {
+        MixAnalyzer an; const double fs = 48000; an.prepare (fs);
+        Transport t; t.isPlaying = true; t.hasMusicalPosition = true; t.bpm = 174; t.ppqPosition = 16.0 * 4;  // bar 17
+        const int block = 480; std::vector<float> L (block), R (block);
+        unsigned seed = 3; auto noise = [&] { seed = seed * 1664525u + 1013904223u; return ((seed >> 8) / 8388608.0 - 1.0); };
+        int widthAlerts = 0, widthBar = 0; long n = 0;
+        const double barSec = 4 * 60.0 / 174;
+        for (int b = 0; b < (int) (fs * barSec * 26 / block); ++b)
+        {
+            for (int i = 0; i < block; ++i, ++n)
+            {
+                const bool drop = n / fs >= barSec * 16;
+                const double a = noise(), c = noise();
+                L[(size_t) i] = (float) (drop ? 0.5 * a : 0.08 * a);
+                R[(size_t) i] = (float) (drop ? 0.5 * a : 0.08 * c);           // breakdown: decorrelated = wide
+            }
+            an.process (L.data(), R.data(), block, t);
+            t.ppqPosition += block * t.bpm / 60.0 / fs;
+            Alert al; while (an.popAlert (al)) if (std::string (al.text).find ("mono (šírka") != std::string::npos) { ++widthAlerts; widthBar = al.bar; std::printf ("     alert bar %d: %s\n", al.bar, al.text); }
+            SectionSummary s; while (an.popSummary (s)) {}
+        }
+        check (widthAlerts == 1, "Width contrast alert once", widthAlerts, 1);
+        check (widthBar == 33, "Width contrast alert at the drop (bar 33)", widthBar, 33);
+    }
+
+    // 10. Premaster vs master: PSR 7 dB warns in premaster (limit 8), not in master (limit 6).
+    const double clipAt = argc > 1 ? std::atof (argv[1]) : 4.5;
+    for (int modeIdx = 0; modeIdx < 2; ++modeIdx)
+    {
+        MixAnalyzer an; const double fs = 48000; an.prepare (fs);
+        an.setMode (modeIdx == 0 ? MasterMode::premaster : MasterMode::master);
+        Transport t; t.isPlaying = true; const int block = 480; std::vector<float> L (block), R (block);
+        int psrAlerts = 0; long n = 0;
+        // Gaussian noise hard-clipped: PSR ends up between 6 and 8 dB
+        unsigned seed = 11; auto uni = [&] { seed = seed * 1664525u + 1013904223u; return ((seed >> 8) / 8388608.0 - 1.0); };
+        for (int b = 0; b < (int) (fs * 12 / block); ++b)
+        {
+            for (int i = 0; i < block; ++i, ++n)
+            {
+                const double u1 = 0.5 * (uni() + 1.0) + 1e-12, u2 = 0.5 * (uni() + 1.0);
+                const double g = std::sqrt (-2.0 * std::log (u1)) * std::cos (2 * pi * u2);   // Box-Muller
+                L[(size_t) i] = R[(size_t) i] = (float) (0.1 * std::clamp (g, -clipAt, clipAt));
+            }
+            an.process (L.data(), R.data(), block, t);
+            Alert al; while (an.popAlert (al)) if (std::string (al.text).find ("PSR") != std::string::npos) ++psrAlerts;
+            SectionSummary s; while (an.popSummary (s)) {}
+        }
+        const double psr = an.getMeters().psrDb;
+        char label[96]; std::snprintf (label, sizeof label, "%s: PSR %.1f dB -> alert %s", modeIdx == 0 ? "Premaster" : "Master", psr, modeIdx == 0 ? "yes" : "no");
+        const bool ok = psr > 6.0 && psr < 8.0 ? (modeIdx == 0 ? psrAlerts == 1 : psrAlerts == 0) : false;
+        check (ok, label, psrAlerts, modeIdx == 0 ? 1 : 0);
     }
 
     std::printf ("\n%s (%d failures)\n", failures == 0 ? "ALL TESTS PASSED" : "SOME TESTS FAILED", failures);

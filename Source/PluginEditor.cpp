@@ -99,7 +99,16 @@ KeecoMixFeedbackEditor::KeecoMixFeedbackEditor (KeecoMixFeedbackProcessor& p)
     styleButton (copyButton);
     copyButton.onClick = [this] { copySummaries(); };
     styleButton (clearButton);
-    clearButton.onClick = [this] { alerts.clear(); repaint(); };
+    clearButton.onClick = [this] { proc.clearLog(); repaint(); };
+
+    modeBox.addItem ("Premaster", 1);
+    modeBox.addItem ("Master", 2);
+    modeBox.setColour (juce::ComboBox::backgroundColourId, col::tile);
+    modeBox.setColour (juce::ComboBox::textColourId, col::text);
+    modeBox.setColour (juce::ComboBox::outlineColourId, col::border);
+    modeBox.setSelectedId (proc.getMode() == kmf::MasterMode::master ? 2 : 1, juce::dontSendNotification);
+    modeBox.onChange = [this] { proc.setMode (modeBox.getSelectedId() == 2 ? kmf::MasterMode::master : kmf::MasterMode::premaster); };
+    addAndMakeVisible (modeBox);
 
     referenceBox.setColour (juce::ComboBox::backgroundColourId, col::tile);
     referenceBox.setColour (juce::ComboBox::textColourId, col::text);
@@ -141,9 +150,6 @@ void KeecoMixFeedbackEditor::timerCallback()
     {
         history.clear(); lastHistorySec = -1.0;
         if (! learning) spectrum.reset();
-        alerts.clear();
-        sectionCount = 0;
-        proc.getSummaries().clear();
         spectrum.setSampleRate (proc.getSampleRateForUi());
     }
     wasPlaying = m.playing;
@@ -158,19 +164,9 @@ void KeecoMixFeedbackEditor::timerCallback()
         lastHistorySec = m.seconds;
     }
 
-    kmf::Alert a;
-    while (proc.getAnalyzer().popAlert (a))
-    {
-        alerts.push_front ({ a.severity, a.bar, a.seconds, juce::String::fromUTF8 (a.text) });
-        if (alerts.size() > 60) alerts.pop_back();
-    }
-
-    kmf::SectionSummary s;
-    while (proc.getAnalyzer().popSummary (s))
-    {
-        proc.getSummaries().add (juce::String::fromUTF8 (s.toJson().c_str()));
-        ++sectionCount;
-    }
+    // Claude or the host may change the mode; keep the box in sync.
+    const int modeId = proc.getMode() == kmf::MasterMode::master ? 2 : 1;
+    if (modeBox.getSelectedId() != modeId) modeBox.setSelectedId (modeId, juce::dontSendNotification);
 
     repaint();
 }
@@ -205,8 +201,7 @@ void KeecoMixFeedbackEditor::toggleLearning()
         spectrum.reset();
         an.startLearning();
         learnButton.setButtonText (u8 ("Ukončiť a uložiť"));
-        alerts.push_front ({ kmf::Severity::info, 0, 0.0,
-                             u8 ("Učím sa referenciu: pusti referenčný track (aspoň 30 s, ideálne celý drop) a potom stlač Ukončiť.") });
+        proc.addNote (u8 ("Učím sa referenciu: pusti referenčný track (aspoň 30 s, ideálne celý drop) a potom stlač Ukončiť."));
         return;
     }
 
@@ -219,7 +214,7 @@ void KeecoMixFeedbackEditor::toggleLearning()
     r.profile = an.stopLearning (name.toStdString());
     if (! r.profile.valid)
     {
-        alerts.push_front ({ kmf::Severity::warning, 0, 0.0, u8 ("Referencia sa neuložila: počul som menej ako 10 s hudby.") });
+        proc.addNote (u8 ("Referencia sa neuložila: počul som menej ako 10 s hudby."), kmf::Severity::warning);
         return;
     }
     r.spectrumCurve = spectrum.getAverage();
@@ -227,16 +222,13 @@ void KeecoMixFeedbackEditor::toggleLearning()
     proc.applyReference (r);
     referenceName.clear();
     refreshReferenceList();
-    alerts.push_front ({ kmf::Severity::info, 0, 0.0, u8 ("Referencia „") + name + u8 ("“ uložená a zapnutá.") });
+    proc.addNote (u8 ("Referencia „") + name + u8 ("“ uložená a zapnutá."));
 }
 
 void KeecoMixFeedbackEditor::copySummaries()
 {
-    const auto& s = proc.getSummaries();
-    juce::String json = "[\n  " + s.joinIntoString (",\n  ") + "\n]";
-    juce::SystemClipboard::copyTextToClipboard (json);
-    alerts.push_front ({ kmf::Severity::info, 0, 0.0,
-                         u8 ("Skopírovaných ") + juce::String (s.size()) + u8 (" súhrnov úsekov do schránky.") });
+    juce::SystemClipboard::copyTextToClipboard (proc.getSectionsJson().replace ("},{\"bars\"", "},\n{\"bars\""));
+    proc.addNote (u8 ("Skopírovaných ") + juce::String (proc.getSectionCount()) + u8 (" súhrnov úsekov do schránky."));
 }
 
 // ------------------------------------------------------------------ layout & paint
@@ -266,10 +258,11 @@ void KeecoMixFeedbackEditor::resized()
     bandsArea = spIn.removeFromBottom (50);
 
     auto h = headerArea.reduced (20, 11);
-    clearButton.setBounds (h.removeFromRight (80)); h.removeFromRight (8);
-    learnButton.setBounds (h.removeFromRight (150)); h.removeFromRight (8);
-    referenceName.setBounds (h.removeFromRight (170)); h.removeFromRight (8);
-    referenceBox.setBounds (h.removeFromRight (190));
+    clearButton.setBounds (h.removeFromRight (72)); h.removeFromRight (8);
+    learnButton.setBounds (h.removeFromRight (140)); h.removeFromRight (8);
+    referenceName.setBounds (h.removeFromRight (136)); h.removeFromRight (8);
+    referenceBox.setBounds (h.removeFromRight (170)); h.removeFromRight (8);
+    modeBox.setBounds (h.removeFromRight (120));
 
     auto al = alertsArea.reduced (16, 10).removeFromTop (22);
     copyButton.setBounds (al.removeFromRight (190));
@@ -303,10 +296,10 @@ void KeecoMixFeedbackEditor::paintHeader (juce::Graphics& g, juce::Rectangle<int
     in.removeFromLeft (12);
 
     g.setColour (col::text); g.setFont (uiFont (15.0f, true));
-    g.drawText ("Keeco Mix Feedback", in.removeFromLeft (170), juce::Justification::centredLeft);
+    g.drawText ("Keeco Mix Feedback", in.removeFromLeft (160), juce::Justification::centredLeft);
 
     // Status pill
-    auto pill = in.removeFromLeft (230).withSizeKeepingCentre (230, 28);
+    auto pill = in.removeFromLeft (240).withSizeKeepingCentre (240, 28);
     const bool on = m.playing;
     g.setColour (learning ? juce::Colour (0xff12283a) : on ? juce::Colour (0xff1e2a1f) : col::tile);
     g.fillRoundedRectangle (pill.toFloat(), 14.0f);
@@ -521,11 +514,16 @@ void KeecoMixFeedbackEditor::paintAlerts (juce::Graphics& g, juce::Rectangle<int
     auto in = r.reduced (16, 10);
     auto head = in.removeFromTop (22).withTrimmedRight (200);
     g.setColour (col::faint); g.setFont (uiFont (11.0f));
-    g.drawText (u8 ("úseky po 8 taktov: ") + juce::String (sectionCount) + u8 ("  ·  AI vrstva príde v ďalšom kroku"),
+    const int port = proc.getLinkPort();
+    const auto linkText = port > 0 ? u8 ("Claude (MCP): pripravené, port ") + juce::String (port)
+                                     + (proc.getLinkRequests() > 0 ? u8 (" · spojené") : juce::String())
+                                   : u8 ("Claude (MCP): nedostupné");
+    g.drawText (u8 ("úseky po 8 taktov: ") + juce::String (proc.getSectionCount()) + u8 ("  ·  ") + linkText,
                 head, juce::Justification::centredRight);
     in.removeFromTop (6);
 
-    if (alerts.empty())
+    const auto items = proc.getLogNewestFirst (40);
+    if (items.empty())
     {
         g.setColour (col::faint); g.setFont (uiFont (13.0f));
         g.drawText (m.playing ? u8 ("Zatiaľ bez pripomienok.") : u8 ("Spusti prehrávanie v DAW – meranie začne od miesta spustenia."),
@@ -533,22 +531,25 @@ void KeecoMixFeedbackEditor::paintAlerts (juce::Graphics& g, juce::Rectangle<int
         return;
     }
 
-    for (const auto& a : alerts)
+    const juce::Colour claudeCol { 0xffb388ff };
+    for (const auto& a : items)
     {
         if (in.getHeight() < 20) break;
+        const bool fromClaude = a.source == KeecoMixFeedbackProcessor::Source::claude;
         juce::AttributedString as;
+        if (fromClaude) as.append ("Claude: ", uiFont (13.0f, true), claudeCol);
         as.append (a.text, uiFont (13.0f), col::text);
         as.setWordWrap (juce::AttributedString::byWord);
         juce::TextLayout layout;
-        auto row = in;
-        const auto badgeText = a.bar > 0 ? "t. " + juce::String (a.bar) : a.seconds > 0 ? timeString (a.seconds) : juce::String ("info");
         const int badgeW = 64;
-        layout.createLayout (as, (float) (row.getWidth() - badgeW - 10));
+        layout.createLayout (as, (float) (in.getWidth() - badgeW - 10));
         const int h = juce::jmax (20, (int) std::ceil (layout.getHeight()));
-        row = in.removeFromTop (h);
+        auto row = in.removeFromTop (h);
+        const auto badgeText = a.bar > 0 ? "t. " + juce::String (a.bar) : a.seconds > 0 ? timeString (a.seconds) : juce::String ("info");
+        const auto c = fromClaude ? claudeCol : severityColour (a.severity);
         auto badge = row.removeFromLeft (badgeW).removeFromTop (20);
-        g.setColour (severityColour (a.severity).withAlpha (0.18f)); g.fillRoundedRectangle (badge.toFloat(), 4.0f);
-        g.setColour (severityColour (a.severity)); g.setFont (monoFont (11.0f));
+        g.setColour (c.withAlpha (0.18f)); g.fillRoundedRectangle (badge.toFloat(), 4.0f);
+        g.setColour (c); g.setFont (monoFont (11.0f));
         g.drawText (badgeText, badge, juce::Justification::centred);
         row.removeFromLeft (10);
         layout.draw (g, row.toFloat());

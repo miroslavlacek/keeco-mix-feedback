@@ -1,6 +1,5 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
-#include <deque>
 #include "PluginProcessor.h"
 #include "dsp/SpectrumAnalyzer.h"
 
@@ -40,15 +39,12 @@ private:
     std::vector<float> history;            // short-term LUFS every 100 ms since playback start
     double lastHistorySec = -1.0;
 
-    struct ShownAlert { kmf::Severity severity; int bar; double seconds; juce::String text; };
-    std::deque<ShownAlert> alerts;
-    int sectionCount = 0;
 
     // layout
     juce::Rectangle<int> headerArea, loudArea, dynArea, stereoArea, spectrumArea, bandsArea, alertsArea;
 
     juce::TextButton modeStereo { "Stereo" }, modeMid { "Mid" }, modeSide { "Side" };
-    juce::ComboBox referenceBox;
+    juce::ComboBox referenceBox, modeBox;
     juce::TextEditor referenceName;
     juce::TextButton learnButton { juce::String::fromUTF8 ("Naučiť referenciu") };
     juce::TextButton copyButton  { juce::String::fromUTF8 ("Kopírovať súhrny (JSON)") };

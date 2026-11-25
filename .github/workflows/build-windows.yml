@@ -16,7 +16,7 @@ jobs:
         run: cmake -S . -B build -A x64
 
       - name: Build plugin
-        run: cmake --build build --config Release --target KeecoMixFeedback_VST3 KeecoMixFeedback_Standalone kmf_dsp_tests
+        run: cmake --build build --config Release --target KeecoMixFeedback_VST3 KeecoMixFeedback_Standalone KeecoMcpBridge kmf_dsp_tests
 
       - name: DSP tests
         run: build\Release\kmf_dsp_tests.exe
@@ -28,3 +28,5 @@ jobs:
           path: |
             build/KeecoMixFeedback_artefacts/Release/VST3/
             build/KeecoMixFeedback_artefacts/Release/Standalone/
+            build/KeecoMcpBridge_artefacts/Release/KeecoMcpBridge.exe
+            CLAUDE-SETUP.md

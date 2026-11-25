@@ -56,6 +56,10 @@ private:
 
 enum class Severity { info, warning, problem };
 
+// Premaster: the track goes to mastering, so judge headroom and over-compression.
+// Master: a finished master, so only the usual delivery checks.
+enum class MasterMode { premaster = 0, master = 1 };
+
 struct Alert
 {
     Severity severity = Severity::info;
@@ -74,6 +78,7 @@ struct SectionSummary
     std::array<double, BandMeter::numBands> balanceDb {};
     std::array<double, BandMeter::numBands> deltaToReferenceDb {};   // 0 when no reference
     bool hasReference = false;
+    bool premaster = true;
 
     std::string toJson() const
     {
@@ -82,7 +87,8 @@ struct SectionSummary
                       + ",\"seconds\":[" + n (fromSec) + "," + n (toSec) + "]"
                       + ",\"shortTermLufs\":" + n (shortTermLufs) + ",\"psrDb\":" + n (psrDb)
                       + ",\"maxTruePeakDb\":" + n (maxTruePeakDb) + ",\"correlation\":" + n (correlation)
-                      + ",\"bassCorrelation\":" + n (bassCorrelation) + ",\"width\":" + n (width) + ",\"bands\":{";
+                      + ",\"bassCorrelation\":" + n (bassCorrelation) + ",\"width\":" + n (width)
+                      + ",\"mode\":\"" + (premaster ? "premaster" : "master") + "\",\"bands\":{";
         for (int i = 0; i < BandMeter::numBands; ++i)
         {
             s += std::string (i ? "," : "") + "\"" + BandMeter::bandNames[i] + "\":{\"balanceDb\":" + n (balanceDb[(size_t) i]);
@@ -101,14 +107,21 @@ public:
     {
         double truePeakWarnDb = -1.0;     // above this: warning
         double truePeakClipDb = 0.0;      // above this: problem
-        double psrLowDb = 6.0;            // short-term PSR below this for psrHoldSec: "too compressed"
+        double psrLowDb = 6.0;            // master: short-term PSR below this for psrHoldSec: "too compressed"
+        double psrLowPremasterDb = 8.0;   // premaster: keep more dynamics for the mastering engineer
         double psrHoldSec = 4.0;
         double bassCorrMin = 0.7;         // below 120 Hz correlation lower than this ...
         double bassHoldSec = 2.0;         // ... for this long: "bass not mono"
         double bassMinLevelDb = -45.0;    // ignore when there is hardly any bass
         double phaseCorrMin = 0.0;        // full-band correlation below 0: phase problem
         double bandDeltaDb = 3.0;         // band off the reference by more than this over a section
+        double widthWideMin = 0.25;       // width contrast: previous section at least this wide ...
+        double widthNarrowMax = 0.10;     // ... and this section at most this wide ...
+        double widthLouderLu = 3.0;       // ... and louder by this much (a drop after a breakdown)
     } thresholds;
+
+    void setMode (MasterMode m) noexcept { mode.store ((int) m); }
+    MasterMode getMode() const noexcept  { return (MasterMode) mode.load(); }
 
     void prepare (double sampleRate)
     {
@@ -223,6 +236,7 @@ private:
         psrLowSince = bassBadSince = -1.0;
         tpWarned = tpClipped = psrWarned = bassWarned = phaseWarned = false;
         sectionStartSec = 0.0; sectionStartBar = 0; sectionSteps = 0;
+        prevSectionValid = false; prevSectionWidth = 0.0; prevSectionLufs = -200.0;
         sectionAccum = {};
         currentBar = 0;
         (void) ppqStart;
@@ -296,16 +310,21 @@ private:
             post (Severity::warning, sec, msg); tpWarned = true;
         }
 
-        if (psr < th.psrLowDb)
+        const bool pre = getMode() == MasterMode::premaster;
+        const double psrLimit = pre ? th.psrLowPremasterDb : th.psrLowDb;
+        if (psr < psrLimit)
         {
             if (psrLowSince < 0) psrLowSince = sec;
             if (! psrWarned && sec - psrLowSince >= th.psrHoldSec)
             {
-                std::snprintf (msg, sizeof msg, "PSR %.1f dB už %.0f s – táto časť je silno stlačená, tranzienty sa strácajú.", psr, sec - psrLowSince);
+                if (pre)
+                    std::snprintf (msg, sizeof msg, "PSR %.1f dB už %.0f s – na premaster je to priveľa kompresie/limitingu. Nechaj masteringu dynamiku (PSR aspoň 8 dB).", psr, sec - psrLowSince);
+                else
+                    std::snprintf (msg, sizeof msg, "PSR %.1f dB už %.0f s – táto časť je silno stlačená, tranzienty sa strácajú.", psr, sec - psrLowSince);
                 post (Severity::warning, sec, msg); psrWarned = true;
             }
         }
-        else if (psr > th.psrLowDb + 1.0) { psrLowSince = -1.0; psrWarned = false; }
+        else if (psr > psrLimit + 1.0) { psrLowSince = -1.0; psrWarned = false; }
 
         if (snap.bassLevelDb > th.bassMinLevelDb && snap.bassCorrelation < th.bassCorrMin)
         {
@@ -355,12 +374,24 @@ private:
             out.psrDb = s.psr / s.n; out.maxTruePeakDb = s.maxTp;
             out.correlation = s.corr / s.n; out.bassCorrelation = s.bassCorr / s.n; out.width = s.width / s.n;
             out.hasReference = referenceValid.load();
+            out.premaster = getMode() == MasterMode::premaster;
             for (int i = 0; i < BandMeter::numBands; ++i)
             {
                 out.balanceDb[(size_t) i] = s.balance[(size_t) i] / s.n;
                 out.deltaToReferenceDb[(size_t) i] = s.delta[(size_t) i] / s.n;
             }
             summaries.push (out);
+
+            // Width contrast: a loud, narrow section right after a wide one (e.g. a mono drop after a wide breakdown).
+            if (prevSectionValid && prevSectionWidth >= thresholds.widthWideMin && out.width <= thresholds.widthNarrowMax
+                && out.shortTermLufs >= prevSectionLufs + thresholds.widthLouderLu)
+            {
+                char msg[256];
+                std::snprintf (msg, sizeof msg, "Od t. %d je mix takmer mono (šírka %.0f %%), predchádzajúca časť mala %.0f %%. Drop môže pôsobiť menší ako breakdown – ak to nie je zámer, skontroluj, či sa niečo nemonuje.",
+                               out.fromBar, out.width * 100.0, prevSectionWidth * 100.0);
+                post (Severity::info, sec, msg, out.fromBar);
+            }
+            prevSectionValid = true; prevSectionWidth = out.width; prevSectionLufs = out.shortTermLufs;
 
             // Section-level rule: a band clearly off the reference for the whole section.
             if (out.hasReference)
@@ -422,6 +453,8 @@ private:
         long n = 0;
     } sectionAccum;
     double sectionStartSec = 0; int sectionStartBar = 0; long sectionSteps = 0;
+    bool prevSectionValid = false; double prevSectionWidth = 0.0, prevSectionLufs = -200.0;
+    std::atomic<int> mode { (int) MasterMode::premaster };
 
     std::array<std::atomic<double>, BandMeter::numBands> refBalance {};
     std::atomic<bool> referenceValid { false }, learning { false };

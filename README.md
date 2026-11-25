@@ -1,4 +1,4 @@
-# Keeco Mix Feedback – prototyp v0.1
+# Keeco Mix Feedback – prototyp v0.2
 
 VST3 plugin na master, ktorý počas prehrávania meria mix a hlási, na čo sa zamerať.
 Zvuk len počúva, nič na ňom nemení.
@@ -12,7 +12,9 @@ Zvuk len počúva, nič na ňom nemení.
 | Stereo | korelácia, šírka (podiel side), kontrola, či je bas pod 120 Hz mono |
 | Spektrum | FFT 8192, vyhladenie 1/6 oktávy, sklon 4,5 dB/okt., krivky: priemer od spustenia, živé, peak hold, referencia; prepínač Stereo/Mid/Side |
 | Pásma | Sub 20–60, Bas 60–250, Nízke stredy 250–500, Stredy 0,5–4k, Výšky 4k+ – úroveň voči vnímanej hlasitosti; s referenciou rozdiel v dB |
-| Postrehy | upozornenia s číslom taktu: clipping / true peak nad -1 dBTP, PSR pod 6 dB dlhšie ako 4 s, bas nie je mono, záporná korelácia, pásmo mimo referencie o 3 dB a viac počas 8-taktového úseku |
+| Postrehy | upozornenia s číslom taktu: clipping / true peak nad -1 dBTP, priveľa kompresie (PSR pod 8 dB v režime Premaster, pod 6 dB v režime Master, dlhšie ako 4 s), bas nie je mono, záporná korelácia, pásmo mimo referencie o 3 dB a viac počas 8-taktového úseku, výrazný pokles šírky (napr. mono drop po širokom breakdowne) |
+| Režim | Premaster (ide na mastering – stráži rezervu a kompresiu) / Master (hotový master) |
+| Claude | prepojenie s aplikáciou Claude cez MCP – Claude číta merania a píše postrehy do okna pluginu, pozri `CLAUDE-SETUP.md` |
 
 Meranie sa začína vždy znova, keď v DAW stlačíš Play – od miesta, odkiaľ púšťaš.
 Každých 8 taktov plugin uloží súhrn úseku (JSON); to je podklad pre AI vrstvu v ďalšom kroku.
@@ -45,13 +47,15 @@ Každých 8 taktov plugin uloží súhrn úseku (JSON); to je podklad pre AI vrs
 3. Stlač **Ukončiť a uložiť**. Referencia sa uloží do `%APPDATA%\Keeco Mix Feedback\References\` a dá sa vybrať v zozname.
 Porovnanie je zarovnané na vnímanú hlasitosť, takže nevadí, že je referencia hlasnejšia.
 
-## Kým nie je AI vrstva
-Tlačidlo **Kopírovať súhrny (JSON)** skopíruje súhrny všetkých úsekov. Môžeš ich vložiť do chatu s Claude
-a opýtať sa, čo v mixe riešiť ako prvé.
+## Claude
+Nastavenie prepojenia s aplikáciou Claude je v `CLAUDE-SETUP.md`. Bez neho funguje tlačidlo
+**Kopírovať súhrny (JSON)** – súhrny úsekov sa dajú vložiť do ľubovoľného chatu.
 
 ## Štruktúra
 - `Source/dsp/` – meranie bez JUCE (dá sa testovať samostatne): `LoudnessMeter`, `TruePeakMeter`, `BandMeter`, `SpectrumAnalyzer`, `MixAnalyzer` (pravidlá, takty, súhrny)
 - `Source/PluginProcessor.*`, `Source/PluginEditor.*` – plugin a jeho okno
+- `Source/McpLink.h` – lokálne spojenie pluginu s mostom (127.0.0.1, port 47321+)
+- `bridge/BridgeMain.cpp` – `KeecoMcpBridge.exe`, MCP server pre aplikáciu Claude
 - `tests/dsp_tests.cpp` – testy meraní (hlasitosť podľa EBU testovacích signálov, true peak, korelácia, takty, referencia)
 - Prahy pravidiel sú v `MixAnalyzer::Thresholds` – sú to východiskové hodnoty, dolaď ich podľa ucha.
 
