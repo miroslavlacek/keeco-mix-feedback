@@ -10,7 +10,8 @@
 
 namespace
 {
-constexpr const char* serverVersion = "0.2.0";
+constexpr const char* serverVersion = "0.3.0";
+juce::String clientName;                 // from initialize; used to hide audio tools from clients that cannot listen
 
 juce::var obj (std::initializer_list<std::pair<const char*, juce::var>> props)
 {
@@ -64,7 +65,7 @@ juce::String askPlugin (const juce::String& cmd, const juce::var& args, juce::St
 
 // ---------------------------------------------------------------- tools
 
-struct Tool { const char* name; const char* cmd; const char* description; juce::var schema; };
+struct Tool { const char* name; const char* cmd; const char* description; juce::var schema; bool needsListening = false; };
 
 juce::var schema (std::initializer_list<std::pair<const char*, juce::var>> props, juce::StringArray required = {})
 {
@@ -109,6 +110,13 @@ std::vector<Tool> makeTools()
           "Switch the plugin between 'premaster' (track goes to mastering: judge headroom and over-compression) and "
           "'master' (finished master).",
           schema ({ { "mode", obj ({ { "type", "string" }, { "enum", modes } }) } }, { "mode" }) },
+        { "capture_audio", "capture_audio",
+          "Save what the plugin heard on the master during the current playback as a WAV file (16 kHz mono), "
+          "optionally only bars from_bar..to_bar, so you can LISTEN to it: after this call, read the returned file "
+          "(read_many_files with the exact file path) and judge groove, arrangement, energy, sound design and vibe. "
+          "Combine what you hear with get_sections numbers. Keep requests short (8-32 bars) unless asked otherwise.",
+          schema ({ { "from_bar", intProp ("First bar (optional; default: start of playback)") },
+                    { "to_bar", intProp ("Last bar (optional; default: end of what was played)") } }), true },
         { "list_references", "list_references",
           "List saved reference profiles (learned from reference tracks in the plugin) and which one is active.",
           schema ({}) },
@@ -151,6 +159,8 @@ juce::var handle (const juce::var& msg, const std::vector<Tool>& tools)
     if (method == "initialize")
     {
         const auto requested = params["protocolVersion"].toString();
+        clientName = params["clientInfo"]["name"].toString();
+        std::cerr << "client: " << clientName << "\n";
         return response (id, obj ({
             { "protocolVersion", requested.isNotEmpty() ? requested : juce::String ("2025-06-18") },
             { "capabilities", obj ({ { "tools", obj ({ { "listChanged", false } }) } }) },
@@ -159,7 +169,8 @@ juce::var handle (const juce::var& msg, const std::vector<Tool>& tools)
               "Tools for the Keeco Mix Feedback plugin on the DAW master. The user produces minimal deep drum & bass. "
               "Read get_mix_status / get_sections before giving mix advice; refer to bar numbers; when a finding is worth "
               "seeing in the DAW, also send a short version with post_insight. Numbers are measurements of what the "
-              "plugin heard during the current playback only." } }));
+              "plugin heard during the current playback only. If you can listen to audio, use capture_audio and then "
+              "read the WAV file it returns to hear the music itself." } }));
     }
 
     if (method == "ping")
@@ -168,8 +179,10 @@ juce::var handle (const juce::var& msg, const std::vector<Tool>& tools)
     if (method == "tools/list")
     {
         juce::Array<juce::var> list;
+        const bool canListen = ! clientName.containsIgnoreCase ("claude");   // Claude cannot hear audio files
         for (const auto& t : tools)
-            list.add (obj ({ { "name", t.name }, { "description", t.description }, { "inputSchema", t.schema } }));
+            if (canListen || ! t.needsListening)
+                list.add (obj ({ { "name", t.name }, { "description", t.description }, { "inputSchema", t.schema } }));
         return response (id, obj ({ { "tools", list } }));
     }
 
@@ -180,7 +193,14 @@ juce::var handle (const juce::var& msg, const std::vector<Tool>& tools)
         {
             if (name != t.name) continue;
             juce::String error;
-            const auto args = params["arguments"].isObject() ? params["arguments"] : obj ({});
+            auto args = params["arguments"].isObject() ? params["arguments"] : obj ({});
+            if (juce::String (t.cmd) == "capture_audio")
+            {
+                // Captures go next to this program, so a CLI started in that folder can read them.
+                const auto dir = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+                                     .getParentDirectory().getChildFile ("captures");
+                args.getDynamicObject()->setProperty ("dir", dir.getFullPathName());
+            }
             const auto raw = askPlugin (t.cmd, args, error);
             if (raw.isEmpty())
                 return response (id, toolResult (error, true));
@@ -189,7 +209,11 @@ juce::var handle (const juce::var& msg, const std::vector<Tool>& tools)
                 return response (id, toolResult (reply["error"].toString(), true));
             const auto result = reply["result"];
             const auto fmt = juce::JSON::FormatOptions{}.withSpacing (juce::JSON::Spacing::singleLine).withMaxDecimalPlaces (2);
-            return response (id, toolResult (result.isString() ? result.toString() : juce::JSON::toString (result, fmt), false));
+            auto text = result.isString() ? result.toString() : juce::JSON::toString (result, fmt);
+            if (juce::String (t.cmd) == "capture_audio")
+                text << "\nNext step: read this WAV file to listen to it, e.g. read_many_files(paths=[\""
+                     << result["file"].toString().replace ("\\", "/") << "\"]).";
+            return response (id, toolResult (text, false));
         }
         return errorResponse (id, -32602, "Unknown tool: " + name);
     }

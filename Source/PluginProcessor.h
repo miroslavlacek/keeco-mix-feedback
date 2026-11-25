@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "dsp/MixAnalyzer.h"
+#include "dsp/AudioCapture.h"
 #include "ReferenceStore.h"
 #include "McpLink.h"
 
@@ -68,6 +69,8 @@ private:
     void addLog (LogItem item);
 
     kmf::MixAnalyzer analyzer;
+    kmf::AudioCapture capture;                   // current playback, 16 kHz mono, for listening models
+    bool captureWasPlaying = false;              // audio thread only
     std::atomic<double> currentSampleRate { 48000.0 }, hostBpm { 0.0 };
     std::atomic<int> hostSigNum { 4 }, hostSigDen { 4 };
     std::atomic<bool> hostHasPosition { false };

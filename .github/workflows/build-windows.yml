@@ -30,3 +30,5 @@ jobs:
             build/KeecoMixFeedback_artefacts/Release/Standalone/
             build/KeecoMcpBridge_artefacts/Release/KeecoMcpBridge.exe
             CLAUDE-SETUP.md
+            GEMINI-SETUP.md
+            gemini/GEMINI.md

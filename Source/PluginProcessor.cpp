@@ -31,6 +31,8 @@ void KeecoMixFeedbackProcessor::prepareToPlay (double sampleRate, int)
     const auto mode = analyzer.getMode();
     analyzer.prepare (sampleRate);
     analyzer.setMode (mode);
+    capture.prepare (sampleRate);
+    captureWasPlaying = false;
     if (reference.profile.valid)
         analyzer.setReference (reference.profile);
     spectrumFifo.reset();
@@ -63,6 +65,16 @@ void KeecoMixFeedbackProcessor::processBlock (juce::AudioBuffer<float>& buffer, 
     const float* left  = buffer.getReadPointer (0);
     const float* right = buffer.getNumChannels() > 1 ? buffer.getReadPointer (1) : left;
     analyzer.process (left, right, n, t);
+
+    // Recording for capture_audio: restarts with every playback.
+    if (t.isPlaying && ! captureWasPlaying) capture.reset();
+    captureWasPlaying = t.isPlaying;
+    if (t.isPlaying)
+    {
+        const double qnPerBar = 4.0 * t.timeSigNum / juce::jmax (1, t.timeSigDen);
+        const int bar = t.hasMusicalPosition ? (int) std::floor (t.ppqPosition / qnPerBar) + 1 : 0;
+        capture.push (left, right, n, bar);
+    }
 
     if (t.isPlaying)
     {
@@ -320,6 +332,31 @@ juce::String KeecoMixFeedbackProcessor::handleLinkRequest (const juce::String& j
         if (! ReferenceStore::load (name, r)) return failure ("no reference named \"" + name + "\"");
         juce::MessageManager::callAsync ([this, r, a = alive] { if (a->load()) applyReference (r); });
         return reply ("reference set to " + name);
+    }
+
+    if (cmd == "capture_audio")
+    {
+        const juce::File dir (args["dir"].toString());
+        if (! juce::File::isAbsolutePath (args["dir"].toString()) || ! dir.createDirectory())
+            return failure ("capture folder is not usable: " + args["dir"].toString());
+        const int from = args.hasProperty ("from_bar") ? (int) args["from_bar"] : 0;
+        const int to   = args.hasProperty ("to_bar")   ? (int) args["to_bar"]   : 0;
+        int first = 0, last = 0; capture.barSpan (first, last);
+        int start = 0, end = 0;
+        if (capture.samplesWritten() == 0)
+            return failure ("nothing recorded yet - start playback in the DAW first");
+        if (! capture.rangeForBars (from, to, start, end))
+            return failure ("bars " + juce::String (from) + "-" + juce::String (to) + " were not played in this playback; heard bars "
+                            + juce::String (first) + "-" + juce::String (last));
+        const auto name = "keeco_bars_" + juce::String (from > 0 ? from : first) + "-" + juce::String (to > 0 ? to : last)
+                        + "_" + juce::Time::getCurrentTime().formatted ("%H%M%S") + ".wav";
+        const auto file = dir.getChildFile (name);
+        if (! capture.writeWav (file.getFullPathName().toStdString(), start, end))
+            return failure ("could not write " + file.getFullPathName());
+        return reply (obj ({ { "file", file.getFullPathName() }, { "fileName", name },
+                             { "fromBar", from > 0 ? from : first }, { "toBar", to > 0 ? to : last },
+                             { "seconds", num ((end - start) / (double) kmf::AudioCapture::outRate) },
+                             { "format", "WAV, 16 kHz, mono, 16-bit (what the plugin heard on the master)" } }));
     }
 
     return failure ("unknown command: " + cmd);

@@ -1,6 +1,8 @@
 // Standalone tests for the DSP core (no JUCE): g++ -std=c++17 -O2 -I../Source tests/dsp_tests.cpp
 #include "dsp/MixAnalyzer.h"
 #include "dsp/SpectrumAnalyzer.h"
+#include "dsp/AudioCapture.h"
+#include <fstream>
 #include <cstdio>
 #include <vector>
 #include <cmath>
@@ -228,6 +230,32 @@ int main (int argc, char** argv)
         char label[96]; std::snprintf (label, sizeof label, "%s: PSR %.1f dB -> alert %s", modeIdx == 0 ? "Premaster" : "Master", psr, modeIdx == 0 ? "yes" : "no");
         const bool ok = psr > 6.0 && psr < 8.0 ? (modeIdx == 0 ? psrAlerts == 1 : psrAlerts == 0) : false;
         check (ok, label, psrAlerts, modeIdx == 0 ? 1 : 0);
+    }
+
+    // 11. Audio capture: 20 s at 44.1 kHz, 174 BPM from bar 1 -> 16 kHz mono, bar ranges, valid WAV.
+    {
+        AudioCapture cap; const double fs = 44100; cap.prepare (fs, 60.0);
+        const int block = 441; std::vector<float> L (block), R (block);
+        double ppq = 0; long n = 0;
+        for (int b = 0; b < (int) (fs * 20 / block); ++b)
+        {
+            for (int i = 0; i < block; ++i, ++n) L[(size_t) i] = R[(size_t) i] = (float) (0.5 * std::sin (2 * pi * 440 * n / fs));
+            cap.push (L.data(), R.data(), block, (int) std::floor (ppq / 4.0) + 1);
+            ppq += block * 174.0 / 60.0 / fs;
+        }
+        check (std::abs (cap.secondsWritten() - 20.0) < 0.01, "Captured seconds", cap.secondsWritten(), 20.0);
+        int s0, e0; const bool ok = cap.rangeForBars (5, 8, s0, e0);
+        const double barSec = 4 * 60.0 / 174.0;
+        check (ok && std::abs ((e0 - s0) / 16000.0 - 4 * barSec) < 0.03, "Bars 5-8 length (4 bars)", (e0 - s0) / 16000.0, 4 * barSec);
+        check (std::abs (s0 / 16000.0 - 4 * barSec) < 0.03, "Bar 5 starts after 4 bars", s0 / 16000.0, 4 * barSec);
+        const std::string path = "/tmp/kmf_capture_test.wav";
+        check (cap.writeWav (path, s0, e0), "WAV written", 1, 1);
+        std::ifstream f (path, std::ios::binary); std::vector<char> d ((std::istreambuf_iterator<char> (f)), {});
+        const bool hdr = d.size() > 44 && std::string (d.data(), 4) == "RIFF" && std::string (d.data() + 8, 4) == "WAVE";
+        check (hdr && (long) d.size() == 44 + 2L * (e0 - s0), "WAV header and size", (double) d.size(), 44.0 + 2.0 * (e0 - s0));
+        // Level of the 440 Hz sine after resampling: peak about 0.5
+        int peak = 0; for (size_t i = 44 + 2000; i + 1 < d.size(); i += 2) peak = std::max (peak, std::abs ((int) (int16_t) ((unsigned char) d[i] | ((unsigned char) d[i + 1] << 8))));
+        check (std::abs (peak / 32767.0 - 0.5) < 0.03, "Sine level preserved in capture", peak / 32767.0, 0.5);
     }
 
     std::printf ("\n%s (%d failures)\n", failures == 0 ? "ALL TESTS PASSED" : "SOME TESTS FAILED", failures);
