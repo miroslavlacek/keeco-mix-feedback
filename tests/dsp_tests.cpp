@@ -3,6 +3,7 @@
 #include "dsp/SpectrumAnalyzer.h"
 #include "dsp/AudioCapture.h"
 #include <fstream>
+#include <filesystem>
 #include <cstdio>
 #include <vector>
 #include <cmath>
@@ -248,8 +249,9 @@ int main (int argc, char** argv)
         const double barSec = 4 * 60.0 / 174.0;
         check (ok && std::abs ((e0 - s0) / 16000.0 - 4 * barSec) < 0.03, "Bars 5-8 length (4 bars)", (e0 - s0) / 16000.0, 4 * barSec);
         check (std::abs (s0 / 16000.0 - 4 * barSec) < 0.03, "Bar 5 starts after 4 bars", s0 / 16000.0, 4 * barSec);
-        const std::string path = "/tmp/kmf_capture_test.wav";
-        check (cap.writeWav (path, s0, e0), "WAV written", 1, 1);
+        const std::string path = (std::filesystem::temp_directory_path() / "kmf_capture_test.wav").string();
+        const bool wrote = cap.writeWav (path, s0, e0);
+        check (wrote, "WAV written", wrote, 1);
         std::ifstream f (path, std::ios::binary); std::vector<char> d ((std::istreambuf_iterator<char> (f)), {});
         const bool hdr = d.size() > 44 && std::string (d.data(), 4) == "RIFF" && std::string (d.data() + 8, 4) == "WAVE";
         check (hdr && (long) d.size() == 44 + 2L * (e0 - s0), "WAV header and size", (double) d.size(), 44.0 + 2.0 * (e0 - s0));
