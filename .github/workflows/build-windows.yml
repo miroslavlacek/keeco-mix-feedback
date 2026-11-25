@@ -1,0 +1,30 @@
+# Builds the Windows VST3 on GitHub's servers: push the project to a GitHub repo,
+# open Actions -> "Build Windows VST3" -> the finished plugin is under Artifacts.
+name: Build Windows VST3
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -A x64
+
+      - name: Build plugin
+        run: cmake --build build --config Release --target KeecoMixFeedback_VST3 KeecoMixFeedback_Standalone kmf_dsp_tests
+
+      - name: DSP tests
+        run: build\Release\kmf_dsp_tests.exe
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: KeecoMixFeedback-Windows
+          path: |
+            build/KeecoMixFeedback_artefacts/Release/VST3/
+            build/KeecoMixFeedback_artefacts/Release/Standalone/
