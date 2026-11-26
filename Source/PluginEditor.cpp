@@ -498,10 +498,15 @@ void MixSightEditor::paintHeader (juce::Graphics& g, juce::Rectangle<int> r)
     in.removeFromLeft (12);
 
     g.setColour (col::text); g.setFont (uiFont (15.0f, true));
-    auto titleArea = in.removeFromLeft (128);
-    g.drawText ("MixSight", titleArea.removeFromLeft (76), juce::Justification::centredLeft);
-    g.setColour (col::faint); g.setFont (monoFont (11.0f));
-    g.drawText ("v" + mixsight::versionString(), titleArea, juce::Justification::centredLeft);
+    auto titleArea = in.removeFromLeft (128).withSizeKeepingCentre (128, 34);
+    auto titleRow = titleArea.removeFromTop (19);
+    g.drawText ("MixSight", titleRow.removeFromLeft (76), juce::Justification::bottomLeft);
+    g.setColour (col::faint); g.setFont (monoFont (10.5f));
+    g.drawText ("v" + mixsight::versionString(), titleRow, juce::Justification::bottomLeft);
+    // signature: light italic, like a handwritten note under the name
+    g.setColour (col::muted.withAlpha (0.75f));
+    g.setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::italic)).withExtraKerningFactor (0.02f));
+    g.drawText ("by Keeco", titleArea.withTrimmedLeft (1), juce::Justification::topLeft);
 
     // Status pill
     auto pill = in.removeFromLeft (200).withSizeKeepingCentre (200, 28);
