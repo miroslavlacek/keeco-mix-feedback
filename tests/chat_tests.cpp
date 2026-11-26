@@ -44,6 +44,9 @@ int main (int argc, char** argv)
         .replaceWithText ("{ \"mcpServers\": { \"mixsight\": { \"command\": " + juce::JSON::toString (bridge.getFullPathName()) + " } } }");
     setEnv ("KMF_AGY_HOME", home.getFullPathName());
     setEnv ("KMF_AGY_PATH", fake.getFullPathName());
+    auto signedInMarker = tmp.getChildFile ("signed-in");            // stands in for the Windows credential
+    signedInMarker.replaceWithText ("1");
+    setEnv ("KMF_FAKE_SIGNED_IN_FILE", signedInMarker.getFullPathName());
 
     // --- markdown cleanup
     CHECK (AiChat::cleanMarkdown (juce::String::fromUTF8 ("## Nadpis\n**tučné** a `kód`\n* bod\n  - pod")) == juce::String::fromUTF8 ("Nadpis\ntučné a kód\n• bod\n  • pod"));
@@ -155,6 +158,11 @@ int main (int argc, char** argv)
         CHECK (! v["mcpServers"].hasProperty ("keeco-mix-feedback"));
         CHECK (v["mcpServers"]["mixsight"]["command"].toString() == bridge.getFullPathName());
         CHECK (c.getSetupStep() == AiChat::SetupStep::ready);
+
+        signedInMarker.deleteFile();                                  // no stored sign-in -> next step is signing in
+        c.refreshSetup();
+        CHECK (c.getSetupStep() == AiChat::SetupStep::signIn);
+        signedInMarker.replaceWithText ("1");
     }
 
     // --- missing agy
