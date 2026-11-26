@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_core/juce_core.h>
+#include <atomic>
 #include <map>
 #include <memory>
 #include <set>
@@ -7,9 +8,9 @@
 
 // Chat with the Antigravity CLI (agy) from inside the plugin.
 // Every message runs `agy --output-format stream-json [--conversation id] -p "<text>"`
-// in the workspace folder (the folder of KeecoMcpBridge.exe, read from agy's
-// mcp_config.json). agy starts the bridge itself, so the model sees the same
-// plugin tools (status, sections, capture_audio, post_insight…) as in the terminal.
+// in the MixSight install folder (where MixSightBridge.exe and GEMINI.md are).
+// agy starts the bridge itself, so the model sees the same plugin tools
+// (status, sections, capture_audio, post_insight…) as in the terminal.
 class AiChat
 {
 public:
@@ -23,7 +24,7 @@ public:
     AiChat();
     ~AiChat();
 
-    bool send (const juce::String& text, const juce::String& measurements = {});   // false if busy
+    bool send (const juce::String& text, const juce::String& measurements = {}, const juce::String& genre = {});   // false if busy
     void cancel();
     void newConversation();
 
@@ -34,13 +35,18 @@ public:
     juce::String getConversationId() const;
 
     // ---- setup (message thread) ----
+    enum class SetupStep { ready, installAgy, connect, allowTools, signIn };
     void refreshSetup();
+    SetupStep getSetupStep() const;                  // next thing the user has to do
     juce::File getAgyExecutable() const   { return agyExe; }
     juce::File getWorkspace() const       { return workspace; }
     juce::String getServerName() const    { return serverName; }
-    juce::String getSetupProblem() const;            // empty when ready
+    juce::String getSetupProblem() const;            // empty when agy and the bridge are ready
     bool toolsAllowed() const;                       // permissions.allow has mcp(<server>/*)
     bool allowTools (juce::String& error);           // adds the rule to agy's settings.json
+    bool connectBridge (juce::String& log);          // agy mcp add mixsight <bridge>
+    bool openSignIn (juce::String& error);           // visible agy window for Google sign-in
+    bool needsSignIn() const noexcept     { return signInNeeded.load(); }
 
     static juce::File agyHome();                     // ~/.gemini
     static juce::String cleanMarkdown (const juce::String&);
@@ -70,8 +76,10 @@ private:
     int aiMessageIndex = -1;                         // message being streamed in this turn
     std::atomic<int> version { 0 };
 
-    juce::File agyExe, workspace;
-    juce::String serverName { "keeco-mix-feedback" };
+    juce::File agyExe, workspace, bridgeExe;
+    juce::String serverName { "mixsight" };
+    bool registered = false;
+    std::atomic<bool> signInNeeded { false };
 
     std::unique_ptr<Worker> worker;
 

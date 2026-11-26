@@ -1,4 +1,6 @@
 #include "PluginEditor.h"
+#include "AiSetup.h"
+#include "AppPaths.h"
 
 namespace
 {
@@ -70,6 +72,7 @@ enum HelpKey
     hSpectrum, hLegendAvg, hLegendLive, hLegendPeak, hLegendRef, hSpecMode,
     hBandSub, hBandBass, hBandLowMid, hBandMid, hBandHigh,
     hMode, hReference, hRefName, hLearn, hClear, hTabs, hCopy, hAllow, hNewChat, hChat,
+    hAccount, hGenre, hUpdate,
     hNumKeys
 };
 
@@ -107,9 +110,12 @@ const HelpText helpTexts[hNumKeys] =
     { "Vymazať", "Vymaže postrehy a súhrny úsekov v okne pluginu. Merania bežia ďalej." },
     { "Postrehy / AI chat", "Postrehy = upozornenia pluginu s číslom taktu. AI chat = otázky pre Gemini, ktoré vidí merania a vie si vypočuť takty, ktoré práve hrali." },
     { "Kopírovať súhrny", "Skopíruje štatistiky po 8 taktoch (JSON) do schránky, aby si ich mohol vložiť do iného chatu s AI." },
-    { "Povoliť nástroje pluginu", "Jedným klikom povolí Antigravity nástroje tohto pluginu, aby sa nepýtal na potvrdenie pri každom kroku." },
+    { "Nastavenie AI", "Ďalší krok, ktorý chýba, aby AI chat fungoval: nainštalovať Antigravity, pripojiť ho k pluginu, povoliť nástroje pluginu alebo sa prihlásiť cez Google." },
     { "Nový rozhovor", "Začne nový rozhovor s AI – zabudne predchádzajúce otázky. Hodí sa pri inom tracku." },
     { "AI chat", "Napíš otázku a stlač Enter. AI dostane aktuálne merania, pri otázkach na zvuk si nahrá a vypočuje takty. Počúvať sa dajú len takty, ktoré v tomto prehrávaní zazneli." },
+    { "Účet Google", "Otvorí okno Antigravity na prihlásenie do Gemini cez Google účet. Na zmenu účtu v ňom napíš /logout a prihlás sa znova; okno zavrieš príkazom /quit." },
+    { "Žáner", "Napíš, na akom žánri pracuješ (napr. minimal deep DnB, techno, lo-fi). AI podľa toho hodnotí – čo je v jednom žánri chyba, môže byť v inom zámer." },
+    { "Aktualizácia", "Na GitHube je novšia verzia MixSight. Po kliknutí uvidíš, čo je nové, a po potvrdení sa stiahne a nainštaluje. Nová verzia sa načíta po reštarte DAW." },
 };
 
 juce::Colour severityColour (kmf::Severity s)
@@ -118,7 +124,7 @@ juce::Colour severityColour (kmf::Severity s)
 }
 } // namespace
 
-KeecoMixFeedbackEditor::KeecoMixFeedbackEditor (KeecoMixFeedbackProcessor& p)
+MixSightEditor::MixSightEditor (MixSightProcessor& p)
     : AudioProcessorEditor (&p), proc (p)
 {
     fifoL.resize (1 << 15); fifoR.resize (1 << 15);
@@ -207,18 +213,38 @@ KeecoMixFeedbackEditor::KeecoMixFeedbackEditor (KeecoMixFeedbackProcessor& p)
     styleButton (newChatButton); newChatButton.onClick = [this] { proc.getAiChat().newConversation(); refreshChatView (true); };
     styleButton (allowButton);
     allowButton.setColour (juce::TextButton::textColourOffId, col::accent);
-    allowButton.onClick = [this]
+    allowButton.onClick = [this] { onSetupButton(); };
+    styleButton (accountButton);
+    accountButton.onClick = [this]
     {
         juce::String err;
-        auto& chat = proc.getAiChat();
-        if (chat.allowTools (err))
-            proc.addNote (u8 ("Antigravity: nástroje pluginu sú povolené, už sa nebude pýtať na potvrdenie."));
-        else
-            proc.addNote (u8 ("Povolenie sa nepodarilo: ") + err, kmf::Severity::warning);
+        if (! proc.getAiChat().openSignIn (err))
+            proc.getAiChat().refreshSetup();
+        refreshChatView (true);
         updateChatControls();
     };
-    for (auto* c : { (juce::Component*) &sendButton, (juce::Component*) &newChatButton, (juce::Component*) &allowButton })
+
+    genreEditor.setTextToShowWhenEmpty (u8 ("žáner (napr. deep DnB)"), col::faint);
+    genreEditor.setColour (juce::TextEditor::backgroundColourId, col::tile);
+    genreEditor.setColour (juce::TextEditor::textColourId, col::text);
+    genreEditor.setColour (juce::TextEditor::outlineColourId, col::border);
+    genreEditor.setText (proc.getGenre(), juce::dontSendNotification);
+    genreEditor.onTextChange = [this] { proc.setGenre (genreEditor.getText()); };
+    addChildComponent (genreEditor);
+
+    for (auto* c : { (juce::Component*) &sendButton, (juce::Component*) &newChatButton,
+                     (juce::Component*) &allowButton, (juce::Component*) &accountButton })
         c->setVisible (false);
+
+    // ---- updates
+    styleButton (updateButton);
+    updateButton.setColour (juce::TextButton::buttonColourId, col::accent.withAlpha (0.18f));
+    updateButton.setColour (juce::TextButton::textColourOffId, col::accent);
+    updateButton.onClick = [this] { onUpdateButton(); };
+    updateButton.setVisible (false);
+    proc.getUpdater().checkIfDue();
+    const auto updatedNote = proc.getUpdater().getInstalledNote();
+    if (updatedNote.isNotEmpty()) proc.addNote (updatedNote);
 
     setResizable (true, true);
     setResizeLimits (980, 760, 2000, 1400);
@@ -228,14 +254,14 @@ KeecoMixFeedbackEditor::KeecoMixFeedbackEditor (KeecoMixFeedbackProcessor& p)
     startTimerHz (30);
 }
 
-KeecoMixFeedbackEditor::~KeecoMixFeedbackEditor()
+MixSightEditor::~MixSightEditor()
 {
     stopTimer();
 }
 
 // ------------------------------------------------------------------ data
 
-void KeecoMixFeedbackEditor::timerCallback()
+void MixSightEditor::timerCallback()
 {
     const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
     const double dt = juce::jlimit (0.001, 0.5, now - lastTick);
@@ -261,7 +287,13 @@ void KeecoMixFeedbackEditor::timerCallback()
         lastHistorySec = m.seconds;
     }
 
-    if (chatTab) { refreshChatView (false); updateChatControls(); }
+    if (chatTab)
+    {
+        if (++setupRefreshTicks >= 60) { setupRefreshTicks = 0; proc.getAiChat().refreshSetup(); }   // every 2 s
+        refreshChatView (false);
+        updateChatControls();
+    }
+    updateUpdateButton();
 
     // The AI or the host may change the mode; keep the box in sync.
     const int modeId = proc.getMode() == kmf::MasterMode::master ? 2 : 1;
@@ -270,7 +302,7 @@ void KeecoMixFeedbackEditor::timerCallback()
     repaint();
 }
 
-void KeecoMixFeedbackEditor::refreshReferenceList()
+void MixSightEditor::refreshReferenceList()
 {
     referenceBox.clear (juce::dontSendNotification);
     referenceBox.addItem (u8 ("Bez referencie"), 1);
@@ -283,7 +315,7 @@ void KeecoMixFeedbackEditor::refreshReferenceList()
     referenceBox.setSelectedId (idx >= 0 ? idx + 2 : 1, juce::dontSendNotification);
 }
 
-void KeecoMixFeedbackEditor::onReferenceChosen()
+void MixSightEditor::onReferenceChosen()
 {
     if (referenceBox.getSelectedId() <= 1) { proc.clearReference(); return; }
     StoredReference r;
@@ -291,7 +323,7 @@ void KeecoMixFeedbackEditor::onReferenceChosen()
         proc.applyReference (r);
 }
 
-void KeecoMixFeedbackEditor::toggleLearning()
+void MixSightEditor::toggleLearning()
 {
     auto& an = proc.getAnalyzer();
     if (! learning)
@@ -324,7 +356,7 @@ void KeecoMixFeedbackEditor::toggleLearning()
     proc.addNote (u8 ("Referencia „") + name + u8 ("“ uložená a zapnutá."));
 }
 
-void KeecoMixFeedbackEditor::copySummaries()
+void MixSightEditor::copySummaries()
 {
     juce::SystemClipboard::copyTextToClipboard (proc.getSectionsJson().replace ("},{\"bars\"", "},\n{\"bars\""));
     proc.addNote (u8 ("Skopírovaných ") + juce::String (proc.getSectionCount()) + u8 (" súhrnov úsekov do schránky."));
@@ -332,7 +364,7 @@ void KeecoMixFeedbackEditor::copySummaries()
 
 // ------------------------------------------------------------------ layout & paint
 
-void KeecoMixFeedbackEditor::resized()
+void MixSightEditor::resized()
 {
     auto r = getLocalBounds();
     headerArea = r.removeFromTop (52);
@@ -364,17 +396,23 @@ void KeecoMixFeedbackEditor::resized()
     auto h = headerArea.reduced (20, 11);
     clearButton.setBounds (h.removeFromRight (72)); h.removeFromRight (8);
     learnButton.setBounds (h.removeFromRight (140)); h.removeFromRight (8);
-    referenceName.setBounds (h.removeFromRight (136)); h.removeFromRight (8);
-    referenceBox.setBounds (h.removeFromRight (170)); h.removeFromRight (8);
-    modeBox.setBounds (h.removeFromRight (120));
+    referenceName.setBounds (h.removeFromRight (104)); h.removeFromRight (8);
+    referenceBox.setBounds (h.removeFromRight (150)); h.removeFromRight (8);
+    modeBox.setBounds (h.removeFromRight (112));     h.removeFromRight (10);
+    // logo 28 + 12 + title 128 + status 200 = 368 on the left
+    updateButton.setBounds (h.removeFromRight (juce::jmin (160, juce::jmax (0, h.getWidth() - 376))));
 
     auto alIn = alertsArea.reduced (16, 10);
     auto al = alIn.removeFromTop (22);
     tabInsights.setBounds (al.removeFromLeft (92)); al.removeFromLeft (6);
     tabChat.setBounds (al.removeFromLeft (92));     al.removeFromLeft (12);
+    auto chatRow = al;
     copyButton.setBounds (al.removeFromRight (190));
-    newChatButton.setBounds (al.removeFromRight (120)); al.removeFromRight (8);
-    allowButton.setBounds (al.removeFromRight (190));
+    newChatButton.setBounds (chatRow.removeFromRight (116)); chatRow.removeFromRight (8);
+    accountButton.setBounds (chatRow.removeFromRight (104)); chatRow.removeFromRight (8);
+    allowButton.setBounds (chatRow.removeFromRight (allowButton.isVisible() ? 200 : 0));
+    if (allowButton.isVisible()) chatRow.removeFromRight (8);
+    genreEditor.setBounds (chatRow.removeFromLeft (juce::jmin (200, chatRow.getWidth())));
 
     alIn.removeFromTop (8);
     auto inputRow = alIn.removeFromBottom (30);
@@ -386,7 +424,7 @@ void KeecoMixFeedbackEditor::resized()
     chatView.setBounds (alIn);
 }
 
-void KeecoMixFeedbackEditor::paint (juce::Graphics& g)
+void MixSightEditor::paint (juce::Graphics& g)
 {
     g.fillAll (col::bg);
     helpZones.clear();
@@ -396,6 +434,7 @@ void KeecoMixFeedbackEditor::paint (juce::Graphics& g)
     zoneOf (modeStereo, hSpecMode); zoneOf (modeMid, hSpecMode); zoneOf (modeSide, hSpecMode);
     zoneOf (tabInsights, hTabs); zoneOf (tabChat, hTabs); zoneOf (copyButton, hCopy);
     zoneOf (allowButton, hAllow); zoneOf (newChatButton, hNewChat);
+    zoneOf (accountButton, hAccount); zoneOf (genreEditor, hGenre); zoneOf (updateButton, hUpdate);
     zoneOf (chatView, hChat); zoneOf (chatInput, hChat); zoneOf (sendButton, hChat);
 
     paintHeader (g, headerArea);
@@ -408,7 +447,7 @@ void KeecoMixFeedbackEditor::paint (juce::Graphics& g)
     paintHelp (g, helpArea);
 }
 
-void KeecoMixFeedbackEditor::mouseMove (const juce::MouseEvent& e)
+void MixSightEditor::mouseMove (const juce::MouseEvent& e)
 {
     const auto pos = e.getEventRelativeTo (this).getPosition();
     for (auto it = helpZones.rbegin(); it != helpZones.rend(); ++it)
@@ -419,7 +458,7 @@ void KeecoMixFeedbackEditor::mouseMove (const juce::MouseEvent& e)
         }
 }
 
-void KeecoMixFeedbackEditor::paintHelp (juce::Graphics& g, juce::Rectangle<int> r)
+void MixSightEditor::paintHelp (juce::Graphics& g, juce::Rectangle<int> r)
 {
     if (r.getHeight() < 48) return;
     drawPanel (g, r, {});
@@ -443,7 +482,7 @@ void KeecoMixFeedbackEditor::paintHelp (juce::Graphics& g, juce::Rectangle<int> 
     g.restoreState();
 }
 
-void KeecoMixFeedbackEditor::paintHeader (juce::Graphics& g, juce::Rectangle<int> r)
+void MixSightEditor::paintHeader (juce::Graphics& g, juce::Rectangle<int> r)
 {
     g.setColour (col::header); g.fillRect (r);
     g.setColour (col::border); g.drawHorizontalLine (r.getBottom() - 1, 0.0f, (float) getWidth());
@@ -459,10 +498,13 @@ void KeecoMixFeedbackEditor::paintHeader (juce::Graphics& g, juce::Rectangle<int
     in.removeFromLeft (12);
 
     g.setColour (col::text); g.setFont (uiFont (15.0f, true));
-    g.drawText ("Keeco Mix Feedback", in.removeFromLeft (160), juce::Justification::centredLeft);
+    auto titleArea = in.removeFromLeft (128);
+    g.drawText ("MixSight", titleArea.removeFromLeft (76), juce::Justification::centredLeft);
+    g.setColour (col::faint); g.setFont (monoFont (11.0f));
+    g.drawText ("v" + mixsight::versionString(), titleArea, juce::Justification::centredLeft);
 
     // Status pill
-    auto pill = in.removeFromLeft (240).withSizeKeepingCentre (240, 28);
+    auto pill = in.removeFromLeft (200).withSizeKeepingCentre (200, 28);
     addZone (pill, hStatus);
     const bool on = m.playing;
     g.setColour (learning ? juce::Colour (0xff12283a) : on ? juce::Colour (0xff1e2a1f) : col::tile);
@@ -472,11 +514,11 @@ void KeecoMixFeedbackEditor::paintHeader (juce::Graphics& g, juce::Rectangle<int
     juce::String status = learning ? u8 ("UČÍM SA") : on ? "PLAYING" : "STOPPED";
     if (on && m.bar > 0) status += u8 ("  ·  takt ") + juce::String (m.bar);
     if (on) status += u8 ("  ·  ") + timeString (m.seconds);
-    g.setFont (monoFont (12.0f));
-    g.drawText (status, pill.withTrimmedLeft (28), juce::Justification::centredLeft);
+    g.setFont (monoFont (11.0f));
+    g.drawText (status, pill.withTrimmedLeft (26), juce::Justification::centredLeft);
 }
 
-void KeecoMixFeedbackEditor::paintLoudness (juce::Graphics& g, juce::Rectangle<int> r)
+void MixSightEditor::paintLoudness (juce::Graphics& g, juce::Rectangle<int> r)
 {
     drawPanel (g, r, u8 ("HLASITOSŤ"));
     auto in = r.reduced (16, 12); in.removeFromTop (22);
@@ -523,7 +565,7 @@ void KeecoMixFeedbackEditor::paintLoudness (juce::Graphics& g, juce::Rectangle<i
     g.drawText (u8 ("short-term od spustenia (-30…0 LUFS)"), plot.reduced (6, 3), juce::Justification::topLeft);
 }
 
-void KeecoMixFeedbackEditor::paintDynamics (juce::Graphics& g, juce::Rectangle<int> r)
+void MixSightEditor::paintDynamics (juce::Graphics& g, juce::Rectangle<int> r)
 {
     drawPanel (g, r, "DYNAMIKA");
     auto in = r.reduced (16, 12); in.removeFromTop (24);
@@ -551,7 +593,7 @@ void KeecoMixFeedbackEditor::paintDynamics (juce::Graphics& g, juce::Rectangle<i
     g.drawText (refText, in.removeFromTop (16), juce::Justification::centredLeft);
 }
 
-void KeecoMixFeedbackEditor::paintStereo (juce::Graphics& g, juce::Rectangle<int> r)
+void MixSightEditor::paintStereo (juce::Graphics& g, juce::Rectangle<int> r)
 {
     drawPanel (g, r, "STEREO");
     auto in = r.reduced (16, 12); in.removeFromTop (24);
@@ -588,7 +630,7 @@ void KeecoMixFeedbackEditor::paintStereo (juce::Graphics& g, juce::Rectangle<int
     g.drawText (mono ? "mono OK" : u8 ("nie je mono"), badge, juce::Justification::centred);
 }
 
-void KeecoMixFeedbackEditor::paintSpectrum (juce::Graphics& g, juce::Rectangle<int> r)
+void MixSightEditor::paintSpectrum (juce::Graphics& g, juce::Rectangle<int> r)
 {
     drawPanel (g, r, u8 ("SPEKTRUM  ·  1/6 okt.  ·  sklon 4,5 dB/okt."));
     auto in = r.reduced (16, 12); in.removeFromTop (30);
@@ -663,7 +705,7 @@ void KeecoMixFeedbackEditor::paintSpectrum (juce::Graphics& g, juce::Rectangle<i
     if (proc.hasReference()) item (col::ref, juce::String::fromUTF8 (proc.getReference().profile.name.c_str()), true, hLegendRef);
 }
 
-void KeecoMixFeedbackEditor::paintBands (juce::Graphics& g, juce::Rectangle<int> r)
+void MixSightEditor::paintBands (juce::Graphics& g, juce::Rectangle<int> r)
 {
     const int n = kmf::BandMeter::numBands, gap = 8;
     const int w = (r.getWidth() - gap * (n - 1)) / n;
@@ -683,7 +725,7 @@ void KeecoMixFeedbackEditor::paintBands (juce::Graphics& g, juce::Rectangle<int>
     }
 }
 
-void KeecoMixFeedbackEditor::paintAlerts (juce::Graphics& g, juce::Rectangle<int> r)
+void MixSightEditor::paintAlerts (juce::Graphics& g, juce::Rectangle<int> r)
 {
     drawPanel (g, r, {});
     auto in = r.reduced (16, 10);
@@ -710,7 +752,7 @@ void KeecoMixFeedbackEditor::paintAlerts (juce::Graphics& g, juce::Rectangle<int
     for (const auto& a : items)
     {
         if (in.getHeight() < 20) break;
-        const bool fromAi = a.source == KeecoMixFeedbackProcessor::Source::ai;
+        const bool fromAi = a.source == MixSightProcessor::Source::ai;
         juce::AttributedString as;
         if (fromAi) as.append ("AI: ", uiFont (13.0f, true), aiCol);
         as.append (a.text, uiFont (13.0f), col::text);
@@ -734,12 +776,12 @@ void KeecoMixFeedbackEditor::paintAlerts (juce::Graphics& g, juce::Rectangle<int
 
 // ------------------------------------------------------------------ AI chat
 
-void KeecoMixFeedbackEditor::showTab (bool chat)
+void MixSightEditor::showTab (bool chat)
 {
     chatTab = chat;
     copyButton.setVisible (! chat);
-    for (auto* c : { (juce::Component*) &chatView, (juce::Component*) &chatInput,
-                     (juce::Component*) &sendButton, (juce::Component*) &newChatButton })
+    for (auto* c : { (juce::Component*) &chatView, (juce::Component*) &chatInput, (juce::Component*) &genreEditor,
+                     (juce::Component*) &sendButton, (juce::Component*) &newChatButton, (juce::Component*) &accountButton })
         c->setVisible (chat);
     if (chat)
     {
@@ -754,28 +796,150 @@ void KeecoMixFeedbackEditor::showTab (bool chat)
     repaint();
 }
 
-void KeecoMixFeedbackEditor::sendChat()
+void MixSightEditor::sendChat()
 {
     auto& chat = proc.getAiChat();
     const auto text = chatInput.getText().trim();
     if (text.isEmpty() || chat.isBusy()) return;
-    chat.send (text, proc.buildAiContext());
+    chat.send (text, proc.buildAiContext(), proc.getGenre());
     chatInput.setText ({}, juce::dontSendNotification);
     chatInput.repaint();
     refreshChatView (true);
     updateChatControls();
 }
 
-void KeecoMixFeedbackEditor::updateChatControls()
+void MixSightEditor::updateChatControls()
 {
     auto& chat = proc.getAiChat();
     const bool busy = chat.isBusy();
     sendButton.setButtonText (busy ? u8 ("Zastaviť") : u8 ("Odoslať"));
-    const bool needAllow = chatTab && chat.getSetupProblem().isEmpty() && ! chat.toolsAllowed();
-    if (allowButton.isVisible() != needAllow) allowButton.setVisible (needAllow);
+    juce::String text;
+    switch (chat.getSetupStep())
+    {
+        case AiChat::SetupStep::installAgy: text = u8 ("Nainštalovať Antigravity"); break;
+        case AiChat::SetupStep::connect:    text = u8 ("Pripojiť AI k pluginu"); break;
+        case AiChat::SetupStep::allowTools: text = u8 ("Povoliť nástroje pluginu"); break;
+        case AiChat::SetupStep::signIn:     text = u8 ("Prihlásiť sa cez Google"); break;
+        case AiChat::SetupStep::ready:      break;
+    }
+    const bool show = chatTab && text.isNotEmpty();
+    if (show) allowButton.setButtonText (text);
+    accountButton.setEnabled (chat.getAgyExecutable().existsAsFile());
+    if (allowButton.isVisible() != show) { allowButton.setVisible (show); resized(); }
 }
 
-void KeecoMixFeedbackEditor::refreshChatView (bool force)
+void MixSightEditor::onSetupButton()
+{
+    auto& chat = proc.getAiChat();
+    juce::String msg;
+    switch (chat.getSetupStep())
+    {
+        case AiChat::SetupStep::installAgy:
+        {
+            juce::String err;
+            msg = aisetup::openAgyInstaller (err)
+                ? u8 ("Otvoril som okno s inštaláciou Antigravity. Po jej dokončení okno zavri a klikni na „Pripojiť AI k pluginu“.")
+                : u8 ("Inštaláciu sa nepodarilo spustiť (") + err + u8 ("). Nainštaluj Antigravity ručne: irm https://antigravity.google/cli/install.ps1 | iex");
+            break;
+        }
+        case AiChat::SetupStep::connect:
+        {
+            juce::String log;
+            msg = chat.connectBridge (log) ? u8 ("AI je pripojená k pluginu a nástroje pluginu sú povolené. Ak si sa ešte neprihlásil, klikni na „Účet Google“.")
+                                           : u8 ("Pripojenie sa nepodarilo: ") + log;
+            break;
+        }
+        case AiChat::SetupStep::allowTools:
+        {
+            juce::String err;
+            msg = chat.allowTools (err) ? u8 ("Nástroje pluginu sú povolené – Antigravity sa už nebude pýtať na potvrdenie.")
+                                        : u8 ("Povolenie sa nepodarilo: ") + err;
+            break;
+        }
+        case AiChat::SetupStep::signIn:
+        {
+            juce::String err;
+            if (! chat.openSignIn (err)) msg = u8 ("Okno Antigravity sa nepodarilo otvoriť: ") + err;
+            break;
+        }
+        case AiChat::SetupStep::ready: break;
+    }
+    if (msg.isNotEmpty()) proc.addNote (msg);
+    chat.refreshSetup();
+    refreshChatView (true);
+    updateChatControls();
+}
+
+// ------------------------------------------------------------------ updates
+
+void MixSightEditor::updateUpdateButton()
+{
+    auto& up = proc.getUpdater();
+    juce::String text;
+    switch (up.getState())
+    {
+        case Updater::State::available:   text = u8 ("Nová verzia ") + up.getRelease().version; break;
+        case Updater::State::downloading: text = u8 ("Sťahujem ") + juce::String (juce::roundToInt (up.getProgress() * 100)) + " %"; break;
+        case Updater::State::installing:  text = u8 ("Inštalujem…"); break;
+        case Updater::State::installed:   text = u8 ("Reštartuj DAW"); break;
+        case Updater::State::failed:      text = u8 ("Aktualizácia zlyhala"); break;
+        default: break;
+    }
+    const bool show = text.isNotEmpty();
+    if (up.getState() == Updater::State::available && ! updateNoted)
+    {
+        updateNoted = true;
+        proc.addNote (u8 ("Je dostupná nová verzia MixSight ") + up.getRelease().version
+                      + u8 (" – klikni na „Nová verzia“ v hlavičke."));
+    }
+    if (show && updateButton.getButtonText() != text) updateButton.setButtonText (text);
+    if (updateButton.isVisible() != show) updateButton.setVisible (show);
+}
+
+void MixSightEditor::onUpdateButton()
+{
+    auto& up = proc.getUpdater();
+    const auto r = up.getRelease();
+    juce::Component::SafePointer<MixSightEditor> safe (this);
+
+    if (up.getState() == Updater::State::available)
+    {
+        auto notes = AiChat::cleanMarkdown (r.notes);
+        if (notes.length() > 900) notes = notes.substring (0, 900) + u8 ("…");
+        auto options = juce::MessageBoxOptions()
+            .withIconType (juce::MessageBoxIconType::InfoIcon)
+            .withTitle (u8 ("MixSight ") + r.version + u8 (" je dostupný"))
+            .withMessage (u8 ("Máš verziu ") + mixsight::versionString() + u8 (".\n\nČo je nové:\n") + (notes.isNotEmpty() ? notes : u8 ("(bez popisu)"))
+                          + u8 ("\n\nAktualizácia sa stiahne z GitHubu a nainštaluje. Nová verzia sa načíta po reštarte DAW."))
+            .withButton (u8 ("Stiahnuť a nainštalovať"))
+            .withButton (u8 ("Neskôr"))
+            .withAssociatedComponent (this);
+        juce::AlertWindow::showAsync (options, [safe] (int result)
+        {
+            if (safe != nullptr && result == 1) safe->proc.getUpdater().downloadAndInstall();
+        });
+        return;
+    }
+
+    juce::String title, message;
+    if (up.getState() == Updater::State::installed)
+    {
+        title = u8 ("Aktualizácia je nainštalovaná");
+        message = u8 ("MixSight ") + r.version + u8 (" je nainštalovaný. Ulož projekt a reštartuj DAW (FL Studio) – "
+                  "až potom sa načíta nová verzia. Vybratie a opätovné vloženie pluginu nestačí.");
+    }
+    else if (up.getState() == Updater::State::failed)
+    {
+        title = u8 ("Aktualizácia zlyhala");
+        message = up.getError() + u8 ("\n\nSkús to neskôr znova, alebo si stiahni inštalátor z ") + r.pageUrl;
+    }
+    else return;
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::InfoIcon)
+                                      .withTitle (title).withMessage (message).withButton ("OK").withAssociatedComponent (this),
+                                  nullptr);
+}
+
+void MixSightEditor::refreshChatView (bool force)
 {
     auto& chat = proc.getAiChat();
     const int v = chat.getVersion();
@@ -822,7 +986,7 @@ void KeecoMixFeedbackEditor::refreshChatView (bool force)
     chatView.scrollEditorToPositionCaret (0, chatView.getHeight() - 20);
 }
 
-void KeecoMixFeedbackEditor::paintChat (juce::Graphics& g, juce::Rectangle<int> r)
+void MixSightEditor::paintChat (juce::Graphics& g, juce::Rectangle<int> r)
 {
     drawPanel (g, r, {});
     auto& chat = proc.getAiChat();

@@ -1,10 +1,11 @@
 #pragma once
 #include <juce_core/juce_core.h>
 #include "dsp/MixAnalyzer.h"
+#include "AppPaths.h"
 
 // Saves and loads reference profiles as JSON files in
-//   Windows: %APPDATA%\Keeco Mix Feedback\References
-//   macOS:   ~/Library/Application Support/Keeco Mix Feedback/References
+//   Windows: %APPDATA%\MixSight\References
+//   macOS:   ~/Library/Application Support/MixSight/References
 struct StoredReference
 {
     kmf::ReferenceProfile profile;
@@ -16,8 +17,7 @@ class ReferenceStore
 public:
     static juce::File folder()
     {
-        auto f = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                     .getChildFile ("Keeco Mix Feedback").getChildFile ("References");
+        auto f = mixsight::appData().getChildFile ("References");
         f.createDirectory();
         return f;
     }

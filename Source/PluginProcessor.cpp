@@ -1,17 +1,22 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
-KeecoMixFeedbackProcessor::KeecoMixFeedbackProcessor()
+MixSightProcessor::MixSightProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true))
 {
     link = std::make_unique<McpLinkServer> ([this] (const juce::String& req) { return handleLinkRequest (req); });
     aiChat = std::make_unique<AiChat>();
+    genre = mixsight::appData().getChildFile ("genre.txt").loadFileAsString().trim();   // last used genre
+
+    static std::atomic<bool> cleaned { false };      // leftovers of the previous update (*.old-N), once per process
+    if (! cleaned.exchange (true))
+        juce::Thread::launch ([] { Updater::cleanupOldFiles (mixsight::installDir()); });
     startTimerHz (10);
 }
 
-KeecoMixFeedbackProcessor::~KeecoMixFeedbackProcessor()
+MixSightProcessor::~MixSightProcessor()
 {
     alive->store (false);
     stopTimer();
@@ -19,7 +24,7 @@ KeecoMixFeedbackProcessor::~KeecoMixFeedbackProcessor()
     link.reset();
 }
 
-bool KeecoMixFeedbackProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+bool MixSightProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
     const auto out = layouts.getMainOutputChannelSet();
     if (out != juce::AudioChannelSet::mono() && out != juce::AudioChannelSet::stereo())
@@ -27,7 +32,7 @@ bool KeecoMixFeedbackProcessor::isBusesLayoutSupported (const BusesLayout& layou
     return layouts.getMainInputChannelSet() == out;
 }
 
-void KeecoMixFeedbackProcessor::prepareToPlay (double sampleRate, int)
+void MixSightProcessor::prepareToPlay (double sampleRate, int)
 {
     currentSampleRate.store (sampleRate);
     const auto mode = analyzer.getMode();
@@ -40,7 +45,7 @@ void KeecoMixFeedbackProcessor::prepareToPlay (double sampleRate, int)
     spectrumFifo.reset();
 }
 
-void KeecoMixFeedbackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+void MixSightProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
     const int n = buffer.getNumSamples();
@@ -89,7 +94,7 @@ void KeecoMixFeedbackProcessor::processBlock (juce::AudioBuffer<float>& buffer, 
     // Audio passes through untouched: this plugin only listens.
 }
 
-int KeecoMixFeedbackProcessor::readSpectrumAudio (float* left, float* right, int maxSamples)
+int MixSightProcessor::readSpectrumAudio (float* left, float* right, int maxSamples)
 {
     int s1, n1, s2, n2;
     spectrumFifo.prepareToRead (juce::jmin (maxSamples, spectrumFifo.getNumReady()), s1, n1, s2, n2);
@@ -103,7 +108,7 @@ int KeecoMixFeedbackProcessor::readSpectrumAudio (float* left, float* right, int
 
 // ------------------------------------------------------------------ log & sections
 
-void KeecoMixFeedbackProcessor::timerCallback()
+void MixSightProcessor::timerCallback()
 {
     const bool playing = analyzer.getMeters().playing;
     if (playing && ! wasPlaying)
@@ -127,26 +132,26 @@ void KeecoMixFeedbackProcessor::timerCallback()
     }
 }
 
-void KeecoMixFeedbackProcessor::addLog (LogItem item)
+void MixSightProcessor::addLog (LogItem item)
 {
     const juce::ScopedLock sl (logLock);
     log.push_back (std::move (item));
     if (log.size() > 300) log.erase (log.begin());
 }
 
-void KeecoMixFeedbackProcessor::addNote (const juce::String& text, kmf::Severity s)
+void MixSightProcessor::addNote (const juce::String& text, kmf::Severity s)
 {
     const auto m = analyzer.getMeters();
     addLog ({ s, 0, m.playing ? m.seconds : 0.0, text, Source::plugin });
 }
 
-void KeecoMixFeedbackProcessor::clearLog()
+void MixSightProcessor::clearLog()
 {
     const juce::ScopedLock sl (logLock);
     log.clear();
 }
 
-std::vector<KeecoMixFeedbackProcessor::LogItem> KeecoMixFeedbackProcessor::getLogNewestFirst (size_t maxItems) const
+std::vector<MixSightProcessor::LogItem> MixSightProcessor::getLogNewestFirst (size_t maxItems) const
 {
     const juce::ScopedLock sl (logLock);
     std::vector<LogItem> out;
@@ -154,13 +159,13 @@ std::vector<KeecoMixFeedbackProcessor::LogItem> KeecoMixFeedbackProcessor::getLo
     return out;
 }
 
-int KeecoMixFeedbackProcessor::getSectionCount() const
+int MixSightProcessor::getSectionCount() const
 {
     const juce::ScopedLock sl (logLock);
     return (int) sections.size();
 }
 
-juce::String KeecoMixFeedbackProcessor::getSectionsJson (int fromBar, int toBar) const
+juce::String MixSightProcessor::getSectionsJson (int fromBar, int toBar) const
 {
     const juce::ScopedLock sl (logLock);
     juce::StringArray parts;
@@ -172,7 +177,7 @@ juce::String KeecoMixFeedbackProcessor::getSectionsJson (int fromBar, int toBar)
 
 // ------------------------------------------------------------------ reference & state
 
-void KeecoMixFeedbackProcessor::applyReference (const StoredReference& r)
+void MixSightProcessor::applyReference (const StoredReference& r)
 {
     reference = r;
     analyzer.setReference (r.profile);
@@ -180,7 +185,7 @@ void KeecoMixFeedbackProcessor::applyReference (const StoredReference& r)
     referenceName = juce::String::fromUTF8 (r.profile.name.c_str());
 }
 
-void KeecoMixFeedbackProcessor::clearReference()
+void MixSightProcessor::clearReference()
 {
     reference = {};
     analyzer.setReference ({});
@@ -188,17 +193,18 @@ void KeecoMixFeedbackProcessor::clearReference()
     referenceName.clear();
 }
 
-void KeecoMixFeedbackProcessor::getStateInformation (juce::MemoryBlock& destData)
+void MixSightProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    juce::ValueTree state ("KeecoMixFeedback");
+    juce::ValueTree state ("MixSight");
     if (reference.profile.valid)
         state.setProperty ("reference", ReferenceStore::toJson (reference), nullptr);
     state.setProperty ("mode", analyzer.getMode() == kmf::MasterMode::master ? "master" : "premaster", nullptr);
+    state.setProperty ("genre", getGenre(), nullptr);
     juce::MemoryOutputStream out (destData, false);
     state.writeToStream (out);
 }
 
-void KeecoMixFeedbackProcessor::setStateInformation (const void* data, int sizeInBytes)
+void MixSightProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     const auto state = juce::ValueTree::readFromData (data, (size_t) sizeInBytes);
     if (! state.isValid()) return;
@@ -206,6 +212,7 @@ void KeecoMixFeedbackProcessor::setStateInformation (const void* data, int sizeI
     if (ReferenceStore::fromJson (state.getProperty ("reference").toString(), r))
         applyReference (r);
     analyzer.setMode (state.getProperty ("mode").toString() == "master" ? kmf::MasterMode::master : kmf::MasterMode::premaster);
+    if (state.hasProperty ("genre")) { const juce::ScopedLock sl (refLock); genre = state.getProperty ("genre").toString(); }
 }
 
 // ------------------------------------------------------------------ MCP bridge requests
@@ -232,7 +239,7 @@ juce::String failure (const juce::String& m) { return juce::JSON::toString (obj 
 const char* severityName (kmf::Severity s) { return s == kmf::Severity::problem ? "problem" : s == kmf::Severity::warning ? "warning" : "info"; }
 }
 
-juce::String KeecoMixFeedbackProcessor::statusJson() const
+juce::String MixSightProcessor::statusJson() const
 {
     const auto m = analyzer.getMeters();
     juce::Array<juce::var> bands;
@@ -266,7 +273,13 @@ juce::String KeecoMixFeedbackProcessor::statusJson() const
                   "Sub reads high by nature because K-weighting ignores it; judge bands against a reference." } }));
 }
 
-juce::String KeecoMixFeedbackProcessor::buildAiContext() const
+void MixSightProcessor::setGenre (const juce::String& g)
+{
+    { const juce::ScopedLock sl (refLock); genre = g.trim(); }
+    mixsight::appData().getChildFile ("genre.txt").replaceWithText (g.trim());
+}
+
+juce::String MixSightProcessor::buildAiContext() const
 {
     auto status = juce::JSON::parse (statusJson())["result"];
     if (auto* o = status.getDynamicObject()) o->removeProperty ("note");
@@ -281,7 +294,7 @@ juce::String KeecoMixFeedbackProcessor::buildAiContext() const
          + "ALERTS (najnovšie prvé)\n" + (alerts.isEmpty() ? juce::String ("(žiadne)") : alerts.joinIntoString ("\n"));
 }
 
-juce::String KeecoMixFeedbackProcessor::handleLinkRequest (const juce::String& json)
+juce::String MixSightProcessor::handleLinkRequest (const juce::String& json)
 {
     const auto req = juce::JSON::parse (json);
     const auto cmd = req["cmd"].toString();
@@ -365,7 +378,7 @@ juce::String KeecoMixFeedbackProcessor::handleLinkRequest (const juce::String& j
         if (! capture.rangeForBars (from, to, start, end))
             return failure ("bars " + juce::String (from) + "-" + juce::String (to) + " were not played in this playback; heard bars "
                             + juce::String (first) + "-" + juce::String (last));
-        const auto name = "keeco_bars_" + juce::String (from > 0 ? from : first) + "-" + juce::String (to > 0 ? to : last)
+        const auto name = "mixsight_bars_" + juce::String (from > 0 ? from : first) + "-" + juce::String (to > 0 ? to : last)
                         + "_" + juce::Time::getCurrentTime().formatted ("%H%M%S") + ".wav";
         const auto file = dir.getChildFile (name);
         if (! capture.writeWav (file.getFullPathName().toStdString(), start, end))
@@ -379,12 +392,12 @@ juce::String KeecoMixFeedbackProcessor::handleLinkRequest (const juce::String& j
     return failure ("unknown command: " + cmd);
 }
 
-juce::AudioProcessorEditor* KeecoMixFeedbackProcessor::createEditor()
+juce::AudioProcessorEditor* MixSightProcessor::createEditor()
 {
-    return new KeecoMixFeedbackEditor (*this);
+    return new MixSightEditor (*this);
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-    return new KeecoMixFeedbackProcessor();
+    return new MixSightProcessor();
 }

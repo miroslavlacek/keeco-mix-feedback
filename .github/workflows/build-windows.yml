@@ -1,10 +1,14 @@
-# Builds the Windows VST3 on GitHub's servers: push the project to a GitHub repo,
-# open Actions -> "Build Windows VST3" -> the finished plugin is under Artifacts.
+# Builds MixSight on Windows, runs all tests and packages it.
+# - every push: artifact "MixSight-Windows" (installer + update package)
+# - tag vX.Y.Z:  GitHub Release with MixSight-Setup-X.Y.Z.exe, MixSight-update-X.Y.Z.zip (+ .sha256)
 name: Build Windows VST3
 
 on:
   push:
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   windows:
@@ -12,11 +16,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path CMakeLists.txt -Pattern 'project\(MixSight VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+          "version=$v" >> $env:GITHUB_OUTPUT
+          if ($env:GITHUB_REF -like 'refs/tags/v*' -and $env:GITHUB_REF_NAME -ne "v$v") {
+            throw "Tag $env:GITHUB_REF_NAME does not match CMake version $v"
+          }
+
       - name: Configure
         run: cmake -S . -B build -A x64
 
-      - name: Build plugin
-        run: cmake --build build --config Release --target KeecoMixFeedback_VST3 KeecoMixFeedback_Standalone KeecoMcpBridge kmf_dsp_tests kmf_fake_agy kmf_chat_tests
+      - name: Build
+        run: cmake --build build --config Release --target MixSight_VST3 MixSight_Standalone MixSightBridge MixSightHelper kmf_dsp_tests kmf_fake_agy kmf_chat_tests kmf_update_tests
 
       - name: DSP tests
         run: build\Release\kmf_dsp_tests.exe
@@ -24,14 +38,80 @@ jobs:
       - name: AI chat tests (process runner + stream-json against a fake agy)
         run: build\kmf_chat_tests_artefacts\Release\kmf_chat_tests.exe build\kmf_fake_agy_artefacts\Release\kmf_fake_agy.exe
 
+      - name: Update tests (local HTTP server, locked DLL)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force srv | Out-Null
+          $server = Start-Process python -ArgumentList '-m','http.server','8765','--bind','127.0.0.1','--directory','srv' -PassThru -WindowStyle Hidden
+          Start-Sleep -Seconds 2
+          $env:MIXSIGHT_UPDATE_API = 'http://127.0.0.1:8765'
+          build\kmf_update_tests_artefacts\Release\kmf_update_tests.exe srv
+          $code = $LASTEXITCODE
+          Stop-Process -Id $server.Id -Force
+          exit $code
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $v = '${{ steps.ver.outputs.version }}'
+          $dist = 'dist\MixSight'
+          New-Item -ItemType Directory -Force $dist | Out-Null
+          Copy-Item -Recurse 'build\MixSight_artefacts\Release\VST3\MixSight.vst3' $dist
+          Copy-Item 'build\MixSightBridge_artefacts\Release\MixSightBridge.exe' $dist
+          Copy-Item 'build\MixSightHelper_artefacts\Release\MixSightHelper.exe' $dist
+          Copy-Item 'gemini\GEMINI.md' $dist
+          Copy-Item 'NAVOD.md' $dist
+          # update package: same layout as the install folder
+          $zip = "dist\MixSight-update-$v.zip"
+          Compress-Archive -Path "$dist\*" -DestinationPath $zip -Force
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  MixSight-update-$v.zip" | Out-File -Encoding ascii -NoNewline "$zip.sha256"
+          # installer
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc /Qp "/DMyVersion=$v" "/DDist=$PWD\dist\MixSight" "/O$PWD\dist" installer\MixSight.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          Get-ChildItem dist
+
+      - name: Check update package layout
+        shell: pwsh
+        run: |
+          $v = '${{ steps.ver.outputs.version }}'
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $names = [System.IO.Compression.ZipFile]::OpenRead("dist\MixSight-update-$v.zip").Entries.FullName -replace '\\','/'
+          $names
+          foreach ($need in 'MixSight.vst3/Contents/x86_64-win/MixSight.vst3','MixSightBridge.exe','MixSightHelper.exe','GEMINI.md') {
+            if ($names -notcontains $need) { throw "missing in update zip: $need" }
+          }
+
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: KeecoMixFeedback-Windows
+          name: MixSight-Windows
           path: |
-            build/KeecoMixFeedback_artefacts/Release/VST3/
-            build/KeecoMixFeedback_artefacts/Release/Standalone/
-            build/KeecoMcpBridge_artefacts/Release/KeecoMcpBridge.exe
+            dist/MixSight-Setup-*.exe
+            dist/MixSight-update-*.zip
+            dist/MixSight-update-*.zip.sha256
+            NAVOD.md
             CLAUDE-SETUP.md
-            ANTIGRAVITY-SETUP.md
-            gemini/GEMINI.md
+
+      - name: Release notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $v = '${{ steps.ver.outputs.version }}'
+          $text = Get-Content CHANGELOG.md -Raw -Encoding utf8
+          $m = [regex]::Match($text, "(?ms)^## $([regex]::Escape($v))\s*\r?\n(.*?)(?=^## |\z)")
+          $notes = if ($m.Success) { $m.Groups[1].Value.Trim() } else { "MixSight $v" }
+          $notes += "`n`n**Nová inštalácia:** stiahni MixSight-Setup-$v.exe a spusti ho (návod v NAVOD.md)."
+          $notes | Out-File -Encoding utf8 release-notes.md
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $v = '${{ steps.ver.outputs.version }}'
+          gh release create "v$v" --title "MixSight $v" --notes-file release-notes.md `
+            "dist/MixSight-Setup-$v.exe" "dist/MixSight-update-$v.zip" "dist/MixSight-update-$v.zip.sha256"

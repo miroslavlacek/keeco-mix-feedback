@@ -36,11 +36,12 @@ int main (int argc, char** argv)
     CHECK (fake.existsAsFile());
 
     auto tmp = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("kmf_chat_test_" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
-    auto home = tmp.getChildFile (".gemini"), ws = tmp.getChildFile ("Keeco Ws");
+    auto home = tmp.getChildFile (".gemini"), ws = tmp.getChildFile ("MixSight Ws");
     home.getChildFile ("config").createDirectory(); ws.createDirectory();
-    const auto bridge = ws.getChildFile ("KeecoMcpBridge.exe");
+    const auto bridge = ws.getChildFile ("MixSightBridge.exe");
+    bridge.replaceWithText ("fake bridge");
     home.getChildFile ("config").getChildFile ("mcp_config.json")
-        .replaceWithText ("{ \"mcpServers\": { \"keeco-mix-feedback\": { \"command\": " + juce::JSON::toString (bridge.getFullPathName()) + " } } }");
+        .replaceWithText ("{ \"mcpServers\": { \"mixsight\": { \"command\": " + juce::JSON::toString (bridge.getFullPathName()) + " } } }");
     setEnv ("KMF_AGY_HOME", home.getFullPathName());
     setEnv ("KMF_AGY_PATH", fake.getFullPathName());
 
@@ -53,8 +54,8 @@ int main (int argc, char** argv)
         AiChat::TurnState st;
         c.handleLine (st, R"({"event":"step_update","conversation_id":"x1","step_index":0,"state":"ACTIVE","step_type":"agent_response","text_delta":"Pozriem "})");
         c.handleLine (st, R"({"event":"step_update","conversation_id":"x1","step_index":0,"state":"DONE","step_type":"agent_response","text_delta":"Pozriem sa."})");
-        c.handleLine (st, R"({"event":"step_update","step_index":1,"state":"ACTIVE","step_type":"tool","tool_name":"keeco-mix-feedback/capture_audio"})");
-        c.handleLine (st, R"({"event":"step_update","step_index":1,"state":"DONE","step_type":"tool","tool_name":"keeco-mix-feedback/capture_audio"})");
+        c.handleLine (st, R"({"event":"step_update","step_index":1,"state":"ACTIVE","step_type":"tool","tool_name":"mixsight/capture_audio"})");
+        c.handleLine (st, R"({"event":"step_update","step_index":1,"state":"DONE","step_type":"tool","tool_name":"mixsight/capture_audio"})");
         c.handleLine (st, R"({"event":"step_update","step_index":2,"state":"ACTIVE","step_type":"agent_response","text_delta":"Drop "})");
         c.handleLine (st, R"({"event":"step_update","step_index":2,"state":"ACTIVE","step_type":"agent_response","text_delta":"udrie."})");
         c.handleLine (st, R"({"event":"result","conversation_id":"x1","status":"SUCCESS","response":"Pozriem sa. Drop udrie."})");
@@ -73,11 +74,11 @@ int main (int argc, char** argv)
     // --- tool descriptions for the status line
     {
         juce::var params (new juce::DynamicObject());
-        params.getDynamicObject()->setProperty ("server", "keeco-mix-feedback");
+        params.getDynamicObject()->setProperty ("server", "mixsight");
         params.getDynamicObject()->setProperty ("tool_name", "capture_audio");
         CHECK (AiChat::describeTool ("call_mcp_tool", params).startsWith ("Nahr"));
         juce::var rp (new juce::DynamicObject());
-        rp.getDynamicObject()->setProperty ("AbsolutePath", "C:/KeecoMixFeedback/captures/keeco_bars_33-48.wav");
+        rp.getDynamicObject()->setProperty ("AbsolutePath", "C:/MixSight/captures/mixsight_bars_33-48.wav");
         CHECK (AiChat::describeTool ("read_file", rp).contains ("nahr"));
         CHECK (AiChat::describeTool ("read_file", juce::var()).contains ("podklady"));
         CHECK (AiChat::describeTool ("something", juce::var()).isNotEmpty());
@@ -88,6 +89,8 @@ int main (int argc, char** argv)
         AiChat c;
         CHECK (c.getSetupProblem().isEmpty());
         CHECK (c.getWorkspace() == ws);
+        CHECK (c.getServerName() == "mixsight");
+        CHECK (c.getSetupStep() == AiChat::SetupStep::allowTools);
         const auto prompt = juce::String::fromUTF8 ("Vypočuj si takty 33–48, \"drop\" C:\\cesta\\ ťažký bas");
         CHECK (c.send (prompt, "STATUS {\"bar\": 40}"));
         CHECK (waitIdle (c));
@@ -109,7 +112,8 @@ int main (int argc, char** argv)
         const auto err = allText (c, AiChat::Message::Role::error);
         std::cout << "Error shown: " << err.toStdString();
         CHECK (err.contains ("authentication required"));
-        CHECK (err.contains (juce::String::fromUTF8 ("prihlás")));
+        CHECK (err.contains (juce::String::fromUTF8 ("Prihlásiť")));
+        CHECK (c.needsSignIn());
 
         c.newConversation();
         CHECK (c.getMessages().empty() && c.getConversationId().isEmpty());
@@ -136,13 +140,31 @@ int main (int argc, char** argv)
         CHECK (settings.loadFileAsString() == "{ broken json");                    // untouched
     }
 
+    // --- connecting the bridge through `agy mcp add` (fake agy edits mcp_config.json)
+    {
+        auto cfg = home.getChildFile ("config").getChildFile ("mcp_config.json");
+        cfg.replaceWithText ("{ \"mcpServers\": { \"keeco-mix-feedback\": { \"command\": \"C:\\\\KeecoMixFeedback\\\\KeecoMcpBridge.exe\" } } }");
+        setEnv ("MIXSIGHT_INSTALL_DIR", ws.getFullPathName());
+        home.getChildFile ("antigravity-cli").getChildFile ("settings.json").deleteFile();
+        AiChat c;
+        CHECK (c.getSetupStep() == AiChat::SetupStep::connect);
+        juce::String log;
+        CHECK (c.connectBridge (log));
+        std::cout << "connect log: " << log.toStdString() << "\n";
+        const auto v = juce::JSON::parse (cfg);
+        CHECK (! v["mcpServers"].hasProperty ("keeco-mix-feedback"));
+        CHECK (v["mcpServers"]["mixsight"]["command"].toString() == bridge.getFullPathName());
+        CHECK (c.getSetupStep() == AiChat::SetupStep::ready);
+    }
+
     // --- missing agy
     {
         setEnv ("KMF_AGY_PATH", tmp.getChildFile ("nope.exe").getFullPathName());
         setEnv ("PATH", tmp.getFullPathName());
         setEnv ("LOCALAPPDATA", tmp.getFullPathName());
         AiChat c;
-        CHECK (c.getSetupProblem().contains ("agy"));
+        CHECK (c.getSetupProblem().contains ("Antigravity"));
+        CHECK (c.getSetupStep() == AiChat::SetupStep::installAgy);
         CHECK (! c.send ("ahoj"));
         CHECK (allText (c, AiChat::Message::Role::error).contains ("Antigravity"));
     }

@@ -5,13 +5,14 @@
 #include "ReferenceStore.h"
 #include "McpLink.h"
 #include "AiChat.h"
+#include "Updater.h"
 
-class KeecoMixFeedbackProcessor : public juce::AudioProcessor,
+class MixSightProcessor : public juce::AudioProcessor,
                                   private juce::Timer
 {
 public:
-    KeecoMixFeedbackProcessor();
-    ~KeecoMixFeedbackProcessor() override;
+    MixSightProcessor();
+    ~MixSightProcessor() override;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
@@ -64,6 +65,9 @@ public:
     int getLinkRequests() const noexcept { return link != nullptr ? link->getRequestCount() : 0; }
 
     AiChat& getAiChat() noexcept { return *aiChat; }
+    Updater& getUpdater() noexcept { return *updater; }
+    juce::String getGenre() const { const juce::ScopedLock sl (refLock); return genre; }
+    void setGenre (const juce::String& g);
     juce::String buildAiContext() const;         // current measurements sent along with each chat message
 
 private:
@@ -95,7 +99,9 @@ private:
 
     std::unique_ptr<McpLinkServer> link;
     std::unique_ptr<AiChat> aiChat;
+    juce::SharedResourcePointer<Updater> updater;   // shared by all instances, survives closing the editor
+    juce::String genre;                             // guarded by refLock
     std::shared_ptr<std::atomic<bool>> alive = std::make_shared<std::atomic<bool>> (true);
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (KeecoMixFeedbackProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MixSightProcessor)
 };

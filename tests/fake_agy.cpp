@@ -30,6 +30,30 @@ static void out (const juce::String& line) { std::cout << line.toStdString() << 
 int main (int argc, char** argv)
 {
     const auto args = getArgs (argc, argv);
+    // `agy mcp add <name> <command>` / `agy mcp remove <name>` edit ~/.gemini/config/mcp_config.json
+    if (args[0] == "mcp" && args.size() >= 3)
+    {
+        auto cfg = juce::File (juce::SystemStats::getEnvironmentVariable ("KMF_AGY_HOME", {})).getChildFile ("config").getChildFile ("mcp_config.json");
+        auto root = juce::JSON::parse (cfg);
+        if (root.getDynamicObject() == nullptr) root = juce::var (new juce::DynamicObject());
+        auto servers = root.getProperty ("mcpServers", {});
+        if (servers.getDynamicObject() == nullptr) { servers = juce::var (new juce::DynamicObject()); root.getDynamicObject()->setProperty ("mcpServers", servers); }
+        if (args[1] == "remove")
+        {
+            if (! servers.getDynamicObject()->hasProperty (args[2])) { std::cerr << "server not found\n"; return 1; }
+            servers.getDynamicObject()->removeProperty (args[2]);
+        }
+        else if (args[1] == "add" && args.size() >= 4)
+        {
+            auto* e = new juce::DynamicObject(); e->setProperty ("command", args[3]);
+            servers.getDynamicObject()->setProperty (args[2], juce::var (e));
+            std::cout << "Added MCP server \"" << args[2] << "\" (stdio)" << std::endl;
+        }
+        cfg.getParentDirectory().createDirectory();
+        cfg.replaceWithText (juce::JSON::toString (root));
+        return 0;
+    }
+
     const int p = args.indexOf ("-p");
     const auto prompt = p >= 0 && p + 1 < args.size() ? args[p + 1] : juce::String();
     const int c = args.indexOf ("--conversation");
@@ -50,9 +74,9 @@ int main (int argc, char** argv)
 
     out (j (o ({ { "event", "init" }, { "cwd", juce::File::getCurrentWorkingDirectory().getFullPathName() } })));
     out (j (o ({ { "event", "step_update" }, { "conversation_id", conv }, { "step_index", 1 }, { "state", "ACTIVE" },
-                 { "step_type", "tool" }, { "tool_name", "keeco-mix-feedback/get_mix_status" } })));
+                 { "step_type", "tool" }, { "tool_name", "mixsight/get_mix_status" } })));
     out (j (o ({ { "event", "step_update" }, { "conversation_id", conv }, { "step_index", 1 }, { "state", "DONE" },
-                 { "step_type", "tool" }, { "tool_name", "keeco-mix-feedback/get_mix_status" } })));
+                 { "step_type", "tool" }, { "tool_name", "mixsight/get_mix_status" } })));
     out (j (o ({ { "event", "step_update" }, { "conversation_id", conv }, { "step_index", 2 }, { "state", "ACTIVE" },
                  { "step_type", "agent_response" }, { "text_delta", "**Drop** je " } })));
     out (j (o ({ { "event", "step_update" }, { "conversation_id", conv }, { "step_index", 2 }, { "state", "ACTIVE" },

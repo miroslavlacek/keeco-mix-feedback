@@ -58,6 +58,44 @@ public:
        #endif
     }
 
+    // Starts a program in its own visible console window and returns immediately
+    // (used for the Google sign-in and the Antigravity installer).
+    static bool launchInNewConsole (const std::vector<std::string>& args, const std::string& workingDir, std::string& error)
+    {
+       #if defined (_WIN32)
+        std::wstring cmd;
+        for (size_t i = 0; i < args.size(); ++i) { if (i) cmd += L' '; cmd += quoteArg (widen (args[i])); }
+        std::vector<wchar_t> cmdBuf (cmd.begin(), cmd.end()); cmdBuf.push_back (0);
+        const std::wstring app = widen (args[0]), cwd = widen (workingDir);
+        STARTUPINFOW si {}; si.cb = sizeof (si);
+        PROCESS_INFORMATION pi {};
+        if (! CreateProcessW (app.c_str(), cmdBuf.data(), nullptr, nullptr, FALSE, CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT,
+                              nullptr, cwd.empty() ? nullptr : cwd.c_str(), &si, &pi))
+        {
+            error = "CreateProcess failed (error " + std::to_string (GetLastError()) + ")";
+            return false;
+        }
+        CloseHandle (pi.hThread); CloseHandle (pi.hProcess);
+        return true;
+       #else
+        const pid_t child = fork();
+        if (child < 0) { error = "fork failed"; return false; }
+        if (child == 0)
+        {
+            setsid();
+            if (fork() != 0) _exit (0);                       // double fork: no zombie
+            if (! workingDir.empty() && chdir (workingDir.c_str()) != 0) _exit (126);
+            std::vector<char*> argv;
+            for (auto& a : args) argv.push_back (const_cast<char*> (a.c_str()));
+            argv.push_back (nullptr);
+            execv (args[0].c_str(), argv.data());
+            _exit (127);
+        }
+        int st = 0; waitpid (child, &st, 0);
+        return true;
+       #endif
+    }
+
     bool wasKilled() const noexcept { return killed; }
     std::string getError() const { return errorText; }
     std::string getStderr() const { std::lock_guard<std::mutex> l (stderrLock); return stderrText; }

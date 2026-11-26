@@ -1,5 +1,5 @@
-// KeecoMcpBridge – MCP server (stdio, JSON-RPC 2.0) for Antigravity CLI and the Claude desktop app.
-// The AI client starts this program; it forwards tool calls to the Keeco Mix Feedback plugin
+// MixSightBridge – MCP server (stdio, JSON-RPC 2.0) for Antigravity CLI and the Claude desktop app.
+// The AI client starts this program; it forwards tool calls to the MixSight plugin
 // running in the DAW over a local 127.0.0.1 connection. stdout carries only protocol
 // messages; diagnostics go to stderr.
 #include <juce_core/juce_core.h>
@@ -10,7 +10,7 @@
 
 namespace
 {
-constexpr const char* serverVersion = "0.4.0";
+constexpr const char* serverVersion = MIXSIGHT_VERSION;
 juce::String clientName;                 // from initialize; used to hide audio tools from clients that cannot listen
 
 juce::var obj (std::initializer_list<std::pair<const char*, juce::var>> props)
@@ -58,7 +58,7 @@ juce::String askPlugin (const juce::String& cmd, const juce::var& args, juce::St
         }
         return c.reply;
     }
-    error = "Keeco Mix Feedback is not running. Open the DAW project with the plugin on the master channel "
+    error = "MixSight is not running. Open the DAW project with the plugin on the master channel "
             "(or the standalone app) and try again.";
     return {};
 }
@@ -86,7 +86,7 @@ std::vector<Tool> makeTools()
 
     return {
         { "get_mix_status", "status",
-          "Live measurements from the Keeco Mix Feedback plugin on the DAW master: whether the DAW is playing, current bar, "
+          "Live measurements from the MixSight plugin on the DAW master: whether the DAW is playing, current bar, "
           "tempo, mode (premaster/master), loudness (LUFS momentary/short-term/integrated, LRA), true peak, PLR/PSR, "
           "stereo correlation and width, bass mono check below 120 Hz, and 5 band levels (with delta to the reference if one is active). "
           "Measurement restarts every time playback starts.",
@@ -164,9 +164,9 @@ juce::var handle (const juce::var& msg, const std::vector<Tool>& tools)
         return response (id, obj ({
             { "protocolVersion", requested.isNotEmpty() ? requested : juce::String ("2025-06-18") },
             { "capabilities", obj ({ { "tools", obj ({ { "listChanged", false } }) } }) },
-            { "serverInfo", obj ({ { "name", "keeco-mix-feedback" }, { "version", serverVersion } }) },
+            { "serverInfo", obj ({ { "name", "mixsight" }, { "version", serverVersion } }) },
             { "instructions",
-              "Tools for the Keeco Mix Feedback plugin on the DAW master. The user produces minimal deep drum & bass. "
+              "Tools for the MixSight plugin on the DAW master. "
               "Read get_mix_status / get_sections before giving mix advice; refer to bar numbers; when a finding is worth "
               "seeing in the DAW, also send a short version with post_insight. Numbers are measurements of what the "
               "plugin heard during the current playback only. If you can listen to audio, use capture_audio and then "
@@ -226,7 +226,7 @@ int main()
 {
     std::ios::sync_with_stdio (false);
     const auto tools = makeTools();
-    std::cerr << "keeco-mix-feedback MCP bridge " << serverVersion << " ready\n";
+    std::cerr << "MixSight MCP bridge " << serverVersion << " ready\n";
 
     std::string line;
     while (std::getline (std::cin, line))

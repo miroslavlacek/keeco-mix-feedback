@@ -3,12 +3,12 @@
 #include "PluginProcessor.h"
 #include "dsp/SpectrumAnalyzer.h"
 
-class KeecoMixFeedbackEditor : public juce::AudioProcessorEditor,
+class MixSightEditor : public juce::AudioProcessorEditor,
                                private juce::Timer
 {
 public:
-    explicit KeecoMixFeedbackEditor (KeecoMixFeedbackProcessor&);
-    ~KeecoMixFeedbackEditor() override;
+    explicit MixSightEditor (MixSightProcessor&);
+    ~MixSightEditor() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -37,7 +37,7 @@ private:
     void toggleLearning();
     void copySummaries();
 
-    KeecoMixFeedbackProcessor& proc;
+    MixSightProcessor& proc;
     kmf::SpectrumAnalyzer spectrum;
     std::vector<float> fifoL, fifoR;
     double lastTick = 0.0;
@@ -72,7 +72,17 @@ private:
     juce::TextEditor chatView, chatInput;
     juce::TextButton sendButton { juce::String::fromUTF8 ("Odoslať") };
     juce::TextButton newChatButton { juce::String::fromUTF8 ("Nový rozhovor") };
-    juce::TextButton allowButton { juce::String::fromUTF8 ("Povoliť nástroje pluginu") };
+    juce::TextButton allowButton { juce::String::fromUTF8 ("Povoliť nástroje pluginu") };   // next setup step
+    juce::TextButton accountButton { juce::String::fromUTF8 ("Účet Google") };
+    juce::TextEditor genreEditor;
+    int setupRefreshTicks = 0;
+    void onSetupButton();
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (KeecoMixFeedbackEditor)
+    // updates
+    juce::TextButton updateButton;
+    bool updateNoted = false;
+    void onUpdateButton();
+    void updateUpdateButton();
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MixSightEditor)
 };

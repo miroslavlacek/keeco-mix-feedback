@@ -1,8 +1,9 @@
 #pragma once
 #include <juce_events/juce_events.h>
 #include <functional>
+#include "AppPaths.h"
 
-// Local link between the plugin and the MCP bridge (KeecoMcpBridge.exe).
+// Local link between the plugin and the MCP bridge (MixSightBridge.exe).
 // The plugin listens on 127.0.0.1 only; every message is one JSON request or reply.
 namespace kmflink
 {
@@ -12,9 +13,7 @@ constexpr juce::uint32 magic = 0x4b4d4662;   // "KMFb"
 
 inline juce::File portFile()
 {
-    auto dir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Keeco Mix Feedback");
-    dir.createDirectory();
-    return dir.getChildFile ("link-port.txt");
+    return mixsight::appData().getChildFile ("link-port.txt");
 }
 
 inline juce::MemoryBlock toBlock (const juce::String& s)
