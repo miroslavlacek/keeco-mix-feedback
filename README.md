@@ -1,4 +1,4 @@
-# Keeco Mix Feedback – prototyp v0.3
+# Keeco Mix Feedback – prototyp v0.4
 
 VST3 plugin na master, ktorý počas prehrávania meria mix a hlási, na čo sa zamerať.
 Zvuk len počúva, nič na ňom nemení.
@@ -15,7 +15,7 @@ Zvuk len počúva, nič na ňom nemení.
 | Postrehy | upozornenia s číslom taktu: clipping / true peak nad -1 dBTP, priveľa kompresie (PSR pod 8 dB v režime Premaster, pod 6 dB v režime Master, dlhšie ako 4 s), bas nie je mono, záporná korelácia, pásmo mimo referencie o 3 dB a viac počas 8-taktového úseku, výrazný pokles šírky (napr. mono drop po širokom breakdowne) |
 | Režim | Premaster (ide na mastering – stráži rezervu a kompresiu) / Master (hotový master) |
 | Claude | prepojenie s aplikáciou Claude cez MCP – Claude číta merania a píše postrehy do okna pluginu, pozri `CLAUDE-SETUP.md` |
-| Gemini | ten istý most funguje s Gemini CLI; Gemini si navyše vypočuje vybrané takty (plugin nahráva prehrávanie, 16 kHz mono), pozri `GEMINI-SETUP.md` |
+| AI chat | záložka **AI chat** v okne pluginu: píšeš otázky, odpovedá Gemini cez Antigravity CLI, vidí merania a vypočuje si vybrané takty (plugin nahráva prehrávanie, 16 kHz mono), pozri `ANTIGRAVITY-SETUP.md` |
 
 Meranie sa začína vždy znova, keď v DAW stlačíš Play – od miesta, odkiaľ púšťaš.
 Každých 8 taktov plugin uloží súhrn úseku (JSON); to je podklad pre AI vrstvu v ďalšom kroku.
@@ -56,9 +56,10 @@ Nastavenie prepojenia s aplikáciou Claude je v `CLAUDE-SETUP.md`. Bez neho fung
 - `Source/dsp/` – meranie bez JUCE (dá sa testovať samostatne): `LoudnessMeter`, `TruePeakMeter`, `BandMeter`, `SpectrumAnalyzer`, `MixAnalyzer` (pravidlá, takty, súhrny)
 - `Source/PluginProcessor.*`, `Source/PluginEditor.*` – plugin a jeho okno
 - `Source/McpLink.h` – lokálne spojenie pluginu s mostom (127.0.0.1, port 47321+)
-- `bridge/BridgeMain.cpp` – `KeecoMcpBridge.exe`, MCP server pre aplikáciu Claude aj Gemini CLI
+- `bridge/BridgeMain.cpp` – `KeecoMcpBridge.exe`, MCP server pre Antigravity CLI (Gemini) aj aplikáciu Claude
 - `Source/dsp/AudioCapture.h` – nahrávanie aktuálneho prehrávania pre `capture_audio`
 - `gemini/GEMINI.md` – pokyny pre Gemini (patrí do `C:\KeecoMixFeedback`)
+- `Source/AiChat.cpp`, `Source/ProcessRunner.h` – chat v okne pluginu (spúšťa `agy -p` na pozadí)
 - `tests/dsp_tests.cpp` – testy meraní (hlasitosť podľa EBU testovacích signálov, true peak, korelácia, takty, referencia)
 - Prahy pravidiel sú v `MixAnalyzer::Thresholds` – sú to východiskové hodnoty, dolaď ich podľa ucha.
 

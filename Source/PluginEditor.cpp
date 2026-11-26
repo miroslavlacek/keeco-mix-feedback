@@ -124,6 +124,52 @@ KeecoMixFeedbackEditor::KeecoMixFeedbackEditor (KeecoMixFeedbackProcessor& p)
 
     refreshReferenceList();
 
+    // ---- AI chat
+    for (auto* b : { &tabInsights, &tabChat })
+    {
+        styleButton (*b);
+        b->setClickingTogglesState (true);
+        b->setRadioGroupId (2);
+    }
+    tabInsights.setToggleState (true, juce::dontSendNotification);
+    tabInsights.onClick = [this] { showTab (false); };
+    tabChat.onClick     = [this] { showTab (true); };
+
+    chatView.setMultiLine (true, true);
+    chatView.setReadOnly (true);
+    chatView.setCaretVisible (false);
+    chatView.setScrollbarsShown (true);
+    chatView.setColour (juce::TextEditor::backgroundColourId, col::plot);
+    chatView.setColour (juce::TextEditor::outlineColourId, col::border);
+    chatView.setColour (juce::TextEditor::focusedOutlineColourId, col::border);
+    chatView.setColour (juce::TextEditor::highlightColourId, col::ref.withAlpha (0.3f));
+    addChildComponent (chatView);
+
+    chatInput.setTextToShowWhenEmpty (u8 ("Napíš otázku, napr. „Vypočuj si takty 33–48, udrie drop dosť?“  (Enter = odoslať)"), col::faint);
+    chatInput.setColour (juce::TextEditor::backgroundColourId, col::tile);
+    chatInput.setColour (juce::TextEditor::textColourId, col::text);
+    chatInput.setColour (juce::TextEditor::outlineColourId, col::border);
+    chatInput.setFont (uiFont (14.0f));
+    chatInput.onReturnKey = [this] { sendChat(); };
+    addChildComponent (chatInput);
+
+    styleButton (sendButton);    sendButton.onClick = [this] { if (proc.getAiChat().isBusy()) proc.getAiChat().cancel(); else sendChat(); };
+    styleButton (newChatButton); newChatButton.onClick = [this] { proc.getAiChat().newConversation(); refreshChatView (true); };
+    styleButton (allowButton);
+    allowButton.setColour (juce::TextButton::textColourOffId, col::accent);
+    allowButton.onClick = [this]
+    {
+        juce::String err;
+        auto& chat = proc.getAiChat();
+        if (chat.allowTools (err))
+            proc.addNote (u8 ("Antigravity: nástroje pluginu sú povolené, už sa nebude pýtať na potvrdenie."));
+        else
+            proc.addNote (u8 ("Povolenie sa nepodarilo: ") + err, kmf::Severity::warning);
+        updateChatControls();
+    };
+    for (auto* c : { (juce::Component*) &sendButton, (juce::Component*) &newChatButton, (juce::Component*) &allowButton })
+        c->setVisible (false);
+
     setResizable (true, true);
     setResizeLimits (980, 640, 2000, 1400);
     setSize (1180, 760);
@@ -164,7 +210,9 @@ void KeecoMixFeedbackEditor::timerCallback()
         lastHistorySec = m.seconds;
     }
 
-    // Claude or the host may change the mode; keep the box in sync.
+    if (chatTab) { refreshChatView (false); updateChatControls(); }
+
+    // The AI or the host may change the mode; keep the box in sync.
     const int modeId = proc.getMode() == kmf::MasterMode::master ? 2 : 1;
     if (modeBox.getSelectedId() != modeId) modeBox.setSelectedId (modeId, juce::dontSendNotification);
 
@@ -245,7 +293,7 @@ void KeecoMixFeedbackEditor::resized()
     dynArea    = left.removeFromTop (150);                                    left.removeFromTop (12);
     stereoArea = left.removeFromTop (juce::jmin (150, left.getHeight()));
 
-    auto top = r.removeFromTop ((int) (r.getHeight() * 0.62f));
+    auto top = r.removeFromTop ((int) (r.getHeight() * (chatTab ? 0.42f : 0.62f)));
     r.removeFromTop (12);
     alertsArea = r;
 
@@ -264,8 +312,22 @@ void KeecoMixFeedbackEditor::resized()
     referenceBox.setBounds (h.removeFromRight (170)); h.removeFromRight (8);
     modeBox.setBounds (h.removeFromRight (120));
 
-    auto al = alertsArea.reduced (16, 10).removeFromTop (22);
+    auto alIn = alertsArea.reduced (16, 10);
+    auto al = alIn.removeFromTop (22);
+    tabInsights.setBounds (al.removeFromLeft (92)); al.removeFromLeft (6);
+    tabChat.setBounds (al.removeFromLeft (92));     al.removeFromLeft (12);
     copyButton.setBounds (al.removeFromRight (190));
+    newChatButton.setBounds (al.removeFromRight (120)); al.removeFromRight (8);
+    allowButton.setBounds (al.removeFromRight (190));
+
+    alIn.removeFromTop (8);
+    auto inputRow = alIn.removeFromBottom (30);
+    sendButton.setBounds (inputRow.removeFromRight (96)); inputRow.removeFromRight (8);
+    chatInput.setBounds (inputRow);
+    alIn.removeFromBottom (4);
+    chatStatusArea = alIn.removeFromBottom (18);
+    alIn.removeFromBottom (4);
+    chatView.setBounds (alIn);
 }
 
 void KeecoMixFeedbackEditor::paint (juce::Graphics& g)
@@ -277,7 +339,7 @@ void KeecoMixFeedbackEditor::paint (juce::Graphics& g)
     paintStereo (g, stereoArea);
     paintSpectrum (g, spectrumArea);
     paintBands (g, bandsArea);
-    paintAlerts (g, alertsArea);
+    if (chatTab) paintChat (g, alertsArea); else paintAlerts (g, alertsArea);
 }
 
 void KeecoMixFeedbackEditor::paintHeader (juce::Graphics& g, juce::Rectangle<int> r)
@@ -510,14 +572,14 @@ void KeecoMixFeedbackEditor::paintBands (juce::Graphics& g, juce::Rectangle<int>
 
 void KeecoMixFeedbackEditor::paintAlerts (juce::Graphics& g, juce::Rectangle<int> r)
 {
-    drawPanel (g, r, "POSTREHY");
+    drawPanel (g, r, {});
     auto in = r.reduced (16, 10);
-    auto head = in.removeFromTop (22).withTrimmedRight (200);
+    auto head = in.removeFromTop (22).withTrimmedRight (200).withTrimmedLeft (200);
     g.setColour (col::faint); g.setFont (uiFont (11.0f));
     const int port = proc.getLinkPort();
-    const auto linkText = port > 0 ? u8 ("Claude (MCP): pripravené, port ") + juce::String (port)
+    const auto linkText = port > 0 ? u8 ("AI (MCP): pripravené, port ") + juce::String (port)
                                      + (proc.getLinkRequests() > 0 ? u8 (" · spojené") : juce::String())
-                                   : u8 ("Claude (MCP): nedostupné");
+                                   : u8 ("AI (MCP): nedostupné");
     g.drawText (u8 ("úseky po 8 taktov: ") + juce::String (proc.getSectionCount()) + u8 ("  ·  ") + linkText,
                 head, juce::Justification::centredRight);
     in.removeFromTop (6);
@@ -531,13 +593,13 @@ void KeecoMixFeedbackEditor::paintAlerts (juce::Graphics& g, juce::Rectangle<int
         return;
     }
 
-    const juce::Colour claudeCol { 0xffb388ff };
+    const juce::Colour aiCol { 0xffb388ff };
     for (const auto& a : items)
     {
         if (in.getHeight() < 20) break;
-        const bool fromClaude = a.source == KeecoMixFeedbackProcessor::Source::claude;
+        const bool fromAi = a.source == KeecoMixFeedbackProcessor::Source::ai;
         juce::AttributedString as;
-        if (fromClaude) as.append ("Claude: ", uiFont (13.0f, true), claudeCol);
+        if (fromAi) as.append ("AI: ", uiFont (13.0f, true), aiCol);
         as.append (a.text, uiFont (13.0f), col::text);
         as.setWordWrap (juce::AttributedString::byWord);
         juce::TextLayout layout;
@@ -546,7 +608,7 @@ void KeecoMixFeedbackEditor::paintAlerts (juce::Graphics& g, juce::Rectangle<int
         const int h = juce::jmax (20, (int) std::ceil (layout.getHeight()));
         auto row = in.removeFromTop (h);
         const auto badgeText = a.bar > 0 ? "t. " + juce::String (a.bar) : a.seconds > 0 ? timeString (a.seconds) : juce::String ("info");
-        const auto c = fromClaude ? claudeCol : severityColour (a.severity);
+        const auto c = fromAi ? aiCol : severityColour (a.severity);
         auto badge = row.removeFromLeft (badgeW).removeFromTop (20);
         g.setColour (c.withAlpha (0.18f)); g.fillRoundedRectangle (badge.toFloat(), 4.0f);
         g.setColour (c); g.setFont (monoFont (11.0f));
@@ -554,5 +616,118 @@ void KeecoMixFeedbackEditor::paintAlerts (juce::Graphics& g, juce::Rectangle<int
         row.removeFromLeft (10);
         layout.draw (g, row.toFloat());
         in.removeFromTop (8);
+    }
+}
+
+// ------------------------------------------------------------------ AI chat
+
+void KeecoMixFeedbackEditor::showTab (bool chat)
+{
+    chatTab = chat;
+    copyButton.setVisible (! chat);
+    for (auto* c : { (juce::Component*) &chatView, (juce::Component*) &chatInput,
+                     (juce::Component*) &sendButton, (juce::Component*) &newChatButton })
+        c->setVisible (chat);
+    if (chat)
+    {
+        proc.getAiChat().refreshSetup();
+        refreshChatView (true);
+        updateChatControls();
+        chatInput.grabKeyboardFocus();
+    }
+    else
+        allowButton.setVisible (false);
+    resized();
+    repaint();
+}
+
+void KeecoMixFeedbackEditor::sendChat()
+{
+    auto& chat = proc.getAiChat();
+    const auto text = chatInput.getText().trim();
+    if (text.isEmpty() || chat.isBusy()) return;
+    chat.send (text);
+    chatInput.setText ({}, juce::dontSendNotification);
+    chatInput.repaint();
+    refreshChatView (true);
+    updateChatControls();
+}
+
+void KeecoMixFeedbackEditor::updateChatControls()
+{
+    auto& chat = proc.getAiChat();
+    const bool busy = chat.isBusy();
+    sendButton.setButtonText (busy ? u8 ("Zastaviť") : u8 ("Odoslať"));
+    const bool needAllow = chatTab && chat.getSetupProblem().isEmpty() && ! chat.toolsAllowed();
+    if (allowButton.isVisible() != needAllow) allowButton.setVisible (needAllow);
+}
+
+void KeecoMixFeedbackEditor::refreshChatView (bool force)
+{
+    auto& chat = proc.getAiChat();
+    const int v = chat.getVersion();
+    if (! force && v == chatVersionShown) return;
+    chatVersionShown = v;
+
+    const auto msgs = chat.getMessages();
+    const juce::Colour aiCol { 0xffb388ff };
+    chatView.clear();
+    chatView.setCaretPosition (0);
+
+    auto put = [this] (const juce::String& t, juce::Font f, juce::Colour c)
+    {
+        chatView.setFont (f);
+        chatView.setColour (juce::TextEditor::textColourId, c);
+        chatView.insertTextAtCaret (t);
+    };
+
+    if (msgs.empty())
+    {
+        const auto problem = chat.getSetupProblem();
+        if (problem.isNotEmpty())
+            put (problem + "\n", uiFont (13.5f), col::warn);
+        else
+            put (u8 ("Píš otázky k mixu, odpovedá Gemini cez Antigravity. Vidí merania z pluginu a na požiadanie si "
+                     "vypočuje takty, ktoré práve hrali.\nPríklady:\n  • Aký je stav mixu?\n  • Vypočuj si takty 33–48, udrie drop dosť?\n"
+                     "  • Ktorý nástroj v intre môže robiť zápornú koreláciu?\n\nPracovný priečinok: ")
+                 + chat.getWorkspace().getFullPathName() + "\n", uiFont (13.5f), col::muted);
+    }
+
+    using Role = AiChat::Message::Role;
+    for (const auto& msg : msgs)
+    {
+        switch (msg.role)
+        {
+            case Role::user:  put (u8 ("Ty:  "), uiFont (13.5f, true), col::accent); put (msg.text + "\n\n", uiFont (13.5f), col::text); break;
+            case Role::ai:    put ("AI:  ", uiFont (13.5f, true), aiCol);          put (msg.text + "\n\n", uiFont (13.5f), col::text); break;
+            case Role::tool:  put (u8 ("   ↳ ") + msg.text + "\n", monoFont (11.5f), col::faint); break;
+            case Role::error: put (msg.text + "\n\n", uiFont (13.0f), col::bad); break;
+            case Role::info:  put (msg.text + "\n\n", uiFont (13.0f), col::muted); break;
+        }
+    }
+    chatView.moveCaretToEnd();
+    chatView.scrollEditorToPositionCaret (0, chatView.getHeight() - 20);
+}
+
+void KeecoMixFeedbackEditor::paintChat (juce::Graphics& g, juce::Rectangle<int> r)
+{
+    drawPanel (g, r, {});
+    auto& chat = proc.getAiChat();
+    g.setFont (uiFont (11.5f));
+    auto st = chat.getStatus();
+    if (st.isNotEmpty())
+    {
+        const int dots = (int) (juce::Time::getMillisecondCounter() / 400) % 4;
+        g.setColour (juce::Colour (0xffb388ff));
+        g.drawText ("AI: " + st.trimCharactersAtEnd (u8 ("…")) + juce::String::repeatedString (".", dots),
+                    chatStatusArea, juce::Justification::centredLeft);
+    }
+    else
+    {
+        g.setColour (col::faint);
+        const int port = proc.getLinkPort();
+        g.drawText ((port > 0 ? u8 ("Plugin čaká na AI na porte ") + juce::String (port) : u8 ("Spojenie pluginu nie je dostupné"))
+                    + (chat.getConversationId().isNotEmpty() ? u8 ("  ·  rozhovor pokračuje") : juce::String()),
+                    chatStatusArea, juce::Justification::centredLeft);
     }
 }

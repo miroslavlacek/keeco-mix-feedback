@@ -16,10 +16,13 @@ jobs:
         run: cmake -S . -B build -A x64
 
       - name: Build plugin
-        run: cmake --build build --config Release --target KeecoMixFeedback_VST3 KeecoMixFeedback_Standalone KeecoMcpBridge kmf_dsp_tests
+        run: cmake --build build --config Release --target KeecoMixFeedback_VST3 KeecoMixFeedback_Standalone KeecoMcpBridge kmf_dsp_tests kmf_fake_agy kmf_chat_tests
 
       - name: DSP tests
         run: build\Release\kmf_dsp_tests.exe
+
+      - name: AI chat tests (process runner + stream-json against a fake agy)
+        run: build\kmf_chat_tests_artefacts\Release\kmf_chat_tests.exe build\kmf_fake_agy_artefacts\Release\kmf_fake_agy.exe
 
       - name: Upload
         uses: actions/upload-artifact@v4
@@ -30,5 +33,5 @@ jobs:
             build/KeecoMixFeedback_artefacts/Release/Standalone/
             build/KeecoMcpBridge_artefacts/Release/KeecoMcpBridge.exe
             CLAUDE-SETUP.md
-            GEMINI-SETUP.md
+            ANTIGRAVITY-SETUP.md
             gemini/GEMINI.md

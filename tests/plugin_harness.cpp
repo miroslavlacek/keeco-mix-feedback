@@ -96,6 +96,25 @@ int main (int argc, char** argv)
         juce::MessageManager::getInstance()->runDispatchLoopUntil ((int) (serveSeconds * 1000));
     }
 
+    // 4. Optionally ask the AI chat (KMF_HARNESS_CHAT="question"; agy from KMF_AGY_PATH).
+    const auto question = juce::SystemStats::getEnvironmentVariable ("KMF_HARNESS_CHAT", {});
+    if (question.isNotEmpty())
+    {
+        stop();
+        auto* tab = findButton (*ed, "AI chat");
+        if (tab == nullptr) { std::puts ("chat tab not found"); return 1; }
+        tab->triggerClick(); juce::MessageManager::getInstance()->runDispatchLoopUntil (100);
+        juce::TextEditor* input = nullptr;
+        for (auto* c : ed->getChildren())
+            if (auto* te = dynamic_cast<juce::TextEditor*> (c); te != nullptr && te->getTextToShowWhenEmpty().contains ("Enter"))
+                input = te;
+        if (input == nullptr) { std::puts ("chat input not found"); return 1; }
+        input->setText (question);
+        input->onReturnKey();
+        std::printf ("input after send: [%s]\n", input->getText().toRawUTF8());
+        for (int i = 0; i < 200; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+    }
+
     const auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
     juce::File out (argc > 1 ? argv[1] : "/tmp/kmf_ui.png");
     out.deleteFile();

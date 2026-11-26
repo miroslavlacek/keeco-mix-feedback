@@ -4,6 +4,7 @@
 #include "dsp/AudioCapture.h"
 #include "ReferenceStore.h"
 #include "McpLink.h"
+#include "AiChat.h"
 
 class KeecoMixFeedbackProcessor : public juce::AudioProcessor,
                                   private juce::Timer
@@ -49,8 +50,8 @@ public:
     void setMode (kmf::MasterMode m) { analyzer.setMode (m); }
     kmf::MasterMode getMode() const noexcept { return analyzer.getMode(); }
 
-    // Log shown in the "Postrehy" panel: plugin rules, notes and Claude's insights.
-    enum class Source { rules, plugin, claude };
+    // Log shown in the "Postrehy" panel: plugin rules, notes and the AI's insights.
+    enum class Source { rules, plugin, ai };
     struct LogItem { kmf::Severity severity; int bar; double seconds; juce::String text; Source source; };
     std::vector<LogItem> getLogNewestFirst (size_t maxItems) const;
     void addNote (const juce::String& text, kmf::Severity s = kmf::Severity::info);
@@ -61,6 +62,8 @@ public:
 
     int getLinkPort() const noexcept { return link != nullptr ? link->getPort() : 0; }
     int getLinkRequests() const noexcept { return link != nullptr ? link->getRequestCount() : 0; }
+
+    AiChat& getAiChat() noexcept { return *aiChat; }
 
 private:
     void timerCallback() override;               // drains the analyzer queues (message thread)
@@ -90,6 +93,7 @@ private:
     std::vector<SectionItem> sections;
 
     std::unique_ptr<McpLinkServer> link;
+    std::unique_ptr<AiChat> aiChat;
     std::shared_ptr<std::atomic<bool>> alive = std::make_shared<std::atomic<bool>> (true);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (KeecoMixFeedbackProcessor)

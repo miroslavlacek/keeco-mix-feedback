@@ -7,6 +7,7 @@ KeecoMixFeedbackProcessor::KeecoMixFeedbackProcessor()
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true))
 {
     link = std::make_unique<McpLinkServer> ([this] (const juce::String& req) { return handleLinkRequest (req); });
+    aiChat = std::make_unique<AiChat>();
     startTimerHz (10);
 }
 
@@ -14,6 +15,7 @@ KeecoMixFeedbackProcessor::~KeecoMixFeedbackProcessor()
 {
     alive->store (false);
     stopTimer();
+    aiChat.reset();                 // stops a running agy before the link goes away
     link.reset();
 }
 
@@ -287,7 +289,7 @@ juce::String KeecoMixFeedbackProcessor::handleLinkRequest (const juce::String& j
         for (const auto& l : getLogNewestFirst ((size_t) limit))
             items.add (obj ({ { "severity", severityName (l.severity) }, { "bar", l.bar > 0 ? juce::var (l.bar) : juce::var() },
                               { "secondsSincePlay", num (l.seconds) }, { "text", l.text },
-                              { "source", l.source == Source::claude ? "claude" : l.source == Source::rules ? "rules" : "plugin" } }));
+                              { "source", l.source == Source::ai ? "ai" : l.source == Source::rules ? "rules" : "plugin" } }));
         return reply (items);
     }
 
@@ -299,7 +301,7 @@ juce::String KeecoMixFeedbackProcessor::handleLinkRequest (const juce::String& j
         const int bar = args.hasProperty ("bar") ? (int) args["bar"] : (m.playing ? m.bar : 0);
         const auto sev = args["severity"].toString() == "warning" ? kmf::Severity::warning
                        : args["severity"].toString() == "problem" ? kmf::Severity::problem : kmf::Severity::info;
-        addLog ({ sev, bar, m.playing ? m.seconds : 0.0, text, Source::claude });
+        addLog ({ sev, bar, m.playing ? m.seconds : 0.0, text, Source::ai });
         return reply ("posted");
     }
 

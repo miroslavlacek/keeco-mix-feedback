@@ -1,5 +1,5 @@
-// KeecoMcpBridge – MCP server (stdio, JSON-RPC 2.0) for the Claude desktop app.
-// Claude starts this program; it forwards tool calls to the Keeco Mix Feedback plugin
+// KeecoMcpBridge – MCP server (stdio, JSON-RPC 2.0) for Antigravity CLI and the Claude desktop app.
+// The AI client starts this program; it forwards tool calls to the Keeco Mix Feedback plugin
 // running in the DAW over a local 127.0.0.1 connection. stdout carries only protocol
 // messages; diagnostics go to stderr.
 #include <juce_core/juce_core.h>
@@ -10,7 +10,7 @@
 
 namespace
 {
-constexpr const char* serverVersion = "0.3.0";
+constexpr const char* serverVersion = "0.4.0";
 juce::String clientName;                 // from initialize; used to hide audio tools from clients that cannot listen
 
 juce::var obj (std::initializer_list<std::pair<const char*, juce::var>> props)
@@ -97,7 +97,7 @@ std::vector<Tool> makeTools()
           schema ({ { "from_bar", intProp ("First bar to include (optional)") }, { "to_bar", intProp ("Last bar to include (optional)") } }) },
         { "get_alerts", "alerts",
           "Notes shown in the plugin's 'Postrehy' panel, newest first: automatic rule alerts (clipping, over-compression, "
-          "stereo bass, phase, band vs reference, width contrast) and earlier insights posted by Claude.",
+          "stereo bass, phase, band vs reference, width contrast) and earlier insights posted by the AI.",
           schema ({ { "limit", intProp ("How many items, default 30") } }) },
         { "post_insight", "post_insight",
           "Show a short insight in the plugin window's 'Postrehy' panel, tagged with a bar number, so the producer sees it "

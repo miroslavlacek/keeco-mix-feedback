@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(KeecoMixFeedback VERSION 0.1.0 LANGUAGES C CXX)
+project(KeecoMixFeedback VERSION 0.4.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -27,13 +27,14 @@ juce_add_plugin(KeecoMixFeedback
     NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE
     IS_MIDI_EFFECT FALSE
-    EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     VST3_CATEGORIES Analyzer Fx
     COPY_PLUGIN_AFTER_BUILD FALSE)
 
 target_sources(KeecoMixFeedback PRIVATE
     Source/PluginProcessor.cpp
-    Source/PluginEditor.cpp)
+    Source/PluginEditor.cpp
+    Source/AiChat.cpp)
 
 target_include_directories(KeecoMixFeedback PRIVATE Source)
 
@@ -52,7 +53,7 @@ target_link_libraries(KeecoMixFeedback
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
 
-# MCP bridge for the Claude desktop app (stdio server that talks to the plugin on 127.0.0.1).
+# MCP bridge for Antigravity / Claude desktop (stdio server that talks to the plugin on 127.0.0.1).
 juce_add_console_app(KeecoMcpBridge PRODUCT_NAME "KeecoMcpBridge")
 target_sources(KeecoMcpBridge PRIVATE bridge/BridgeMain.cpp)
 target_compile_definitions(KeecoMcpBridge PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
@@ -69,9 +70,19 @@ add_test(NAME dsp COMMAND kmf_dsp_tests)
 option(KMF_BUILD_HARNESS "Build the headless plugin harness" OFF)
 if(KMF_BUILD_HARNESS)
     juce_add_console_app(kmf_plugin_harness PRODUCT_NAME "kmf_plugin_harness")
-    target_sources(kmf_plugin_harness PRIVATE tests/plugin_harness.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp)
+    target_sources(kmf_plugin_harness PRIVATE tests/plugin_harness.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp Source/AiChat.cpp)
     target_include_directories(kmf_plugin_harness PRIVATE Source)
     target_compile_definitions(kmf_plugin_harness PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0
         JucePlugin_Name="Keeco Mix Feedback" JUCE_MODAL_LOOPS_PERMITTED=1)
     target_link_libraries(kmf_plugin_harness PRIVATE juce::juce_audio_utils juce::juce_dsp juce::juce_recommended_config_flags)
 endif()
+
+# AI chat tests: stream-json parsing + process runner against a fake agy.
+juce_add_console_app(kmf_fake_agy PRODUCT_NAME "kmf_fake_agy")
+target_sources(kmf_fake_agy PRIVATE tests/fake_agy.cpp)
+target_link_libraries(kmf_fake_agy PRIVATE juce::juce_core PUBLIC juce::juce_recommended_config_flags)
+
+juce_add_console_app(kmf_chat_tests PRODUCT_NAME "kmf_chat_tests")
+target_sources(kmf_chat_tests PRIVATE tests/chat_tests.cpp Source/AiChat.cpp)
+target_include_directories(kmf_chat_tests PRIVATE Source)
+target_link_libraries(kmf_chat_tests PRIVATE juce::juce_core juce::juce_events PUBLIC juce::juce_recommended_config_flags)

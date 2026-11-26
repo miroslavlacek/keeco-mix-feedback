@@ -23,6 +23,11 @@ private:
     void paintSpectrum (juce::Graphics&, juce::Rectangle<int>);
     void paintBands (juce::Graphics&, juce::Rectangle<int>);
     void paintAlerts (juce::Graphics&, juce::Rectangle<int>);
+    void paintChat (juce::Graphics&, juce::Rectangle<int>);
+    void showTab (bool chat);
+    void sendChat();
+    void refreshChatView (bool force);
+    void updateChatControls();
 
     void refreshReferenceList();
     void onReferenceChosen();
@@ -49,6 +54,16 @@ private:
     juce::TextButton learnButton { juce::String::fromUTF8 ("Naučiť referenciu") };
     juce::TextButton copyButton  { juce::String::fromUTF8 ("Kopírovať súhrny (JSON)") };
     juce::TextButton clearButton { juce::String::fromUTF8 ("Vymazať") };
+
+    // AI chat (Antigravity)
+    bool chatTab = false;
+    int chatVersionShown = -1;
+    juce::Rectangle<int> chatStatusArea;
+    juce::TextButton tabInsights { "Postrehy" }, tabChat { "AI chat" };
+    juce::TextEditor chatView, chatInput;
+    juce::TextButton sendButton { juce::String::fromUTF8 ("Odoslať") };
+    juce::TextButton newChatButton { juce::String::fromUTF8 ("Nový rozhovor") };
+    juce::TextButton allowButton { juce::String::fromUTF8 ("Povoliť nástroje pluginu") };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (KeecoMixFeedbackEditor)
 };
