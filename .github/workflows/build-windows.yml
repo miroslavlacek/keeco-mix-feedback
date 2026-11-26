@@ -71,7 +71,16 @@ jobs:
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
           & $iscc /Qp "/DMyVersion=$v" "/DDist=$PWD\dist\MixSight" "/O$PWD\dist" installer\MixSight.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          Copy-Item NAVOD.md, CLAUDE-SETUP.md dist
           Get-ChildItem dist
+
+      - name: Helper smoke test
+        shell: pwsh
+        run: |
+          & dist\MixSight\MixSightHelper.exe --status
+          & dist\MixSight\MixSightHelper.exe --signed-in
+          if ($LASTEXITCODE -ne 2) { throw "expected exit code 2 (no Antigravity on the runner), got $LASTEXITCODE" }
+          exit 0
 
       - name: Check update package layout
         shell: pwsh
@@ -92,8 +101,8 @@ jobs:
             dist/MixSight-Setup-*.exe
             dist/MixSight-update-*.zip
             dist/MixSight-update-*.zip.sha256
-            NAVOD.md
-            CLAUDE-SETUP.md
+            dist/NAVOD.md
+            dist/CLAUDE-SETUP.md
 
       - name: Release notes
         if: startsWith(github.ref, 'refs/tags/v')

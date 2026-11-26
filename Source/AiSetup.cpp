@@ -1,6 +1,10 @@
 #include "AiSetup.h"
 #include "AppPaths.h"
 #include "ProcessRunner.h"
+#if JUCE_WINDOWS
+ #include <wincred.h>
+ #pragma comment (lib, "advapi32.lib")
+#endif
 
 namespace aisetup
 {
@@ -132,6 +136,73 @@ bool openSignInWindow (const juce::File& agy, const juce::File& workspace, juce:
                                                             workspace.getFullPathName().toStdString(), err);
     error = err;
     return ok;
+}
+
+bool isSignedIn()
+{
+    const auto fake = juce::SystemStats::getEnvironmentVariable ("KMF_FAKE_SIGNED_IN_FILE", {});   // tests
+    if (fake.isNotEmpty()) return juce::File (fake).existsAsFile();
+   #if JUCE_WINDOWS
+    PCREDENTIALW cred = nullptr;
+    if (CredReadW (L"gemini:antigravity", CRED_TYPE_GENERIC, 0, &cred))
+    {
+        CredFree (cred);
+        return true;
+    }
+    return false;
+   #else
+    return true;      // sign-in detection is Windows-only
+   #endif
+}
+
+bool signInAndWait (const juce::File& agy, const juce::File& workspace, int timeoutSeconds, juce::String& error,
+                    const std::function<bool()>& shouldStop)
+{
+    if (isSignedIn()) return true;
+    if (! agy.existsAsFile()) { error = "agy not found"; return false; }
+
+   #if JUCE_WINDOWS
+    // Visible window (the user picks "Login with Google" there), inside a job object so the
+    // whole agy process tree can be closed once the sign-in is stored.
+    HANDLE job = CreateJobObjectW (nullptr, nullptr);
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION li {};
+    li.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (job != nullptr) SetInformationJobObject (job, JobObjectExtendedLimitInformation, &li, sizeof (li));
+
+    std::wstring cmd = kmf::ProcessRunner::quoteArg (agy.getFullPathName().toWideCharPointer());
+    std::vector<wchar_t> cmdBuf (cmd.begin(), cmd.end()); cmdBuf.push_back (0);
+    const std::wstring cwd = workspace.getFullPathName().toWideCharPointer();
+    STARTUPINFOW si {}; si.cb = sizeof (si);
+    PROCESS_INFORMATION pi {};
+    if (! CreateProcessW (agy.getFullPathName().toWideCharPointer(), cmdBuf.data(), nullptr, nullptr, FALSE,
+                          CREATE_NEW_CONSOLE | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, nullptr,
+                          workspace.isDirectory() ? cwd.c_str() : nullptr, &si, &pi))
+    {
+        error = "CreateProcess failed (" + juce::String ((int) GetLastError()) + ")";
+        if (job != nullptr) CloseHandle (job);
+        return false;
+    }
+    if (job != nullptr) AssignProcessToJobObject (job, pi.hProcess);
+    ResumeThread (pi.hThread);
+    CloseHandle (pi.hThread);
+
+    bool ok = false;
+    for (int i = 0; i < timeoutSeconds * 2; ++i)
+    {
+        if (isSignedIn()) { ok = true; juce::Thread::sleep (2500); break; }       // let agy finish writing
+        if (WaitForSingleObject (pi.hProcess, 500) == WAIT_OBJECT_0) { ok = isSignedIn(); break; }   // user closed it
+        if (shouldStop && shouldStop()) break;
+    }
+    if (job != nullptr) { TerminateJobObject (job, 0); CloseHandle (job); }
+    else TerminateProcess (pi.hProcess, 0);
+    CloseHandle (pi.hProcess);
+    if (! ok && error.isEmpty()) error = juce::String::fromUTF8 ("Prihlásenie sa nedokončilo.");
+    return ok;
+   #else
+    juce::ignoreUnused (workspace, timeoutSeconds, shouldStop);
+    error = "sign-in window is only supported on Windows";
+    return false;
+   #endif
 }
 
 bool openAgyInstaller (juce::String& error)

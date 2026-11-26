@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_core/juce_core.h>
+#include <functional>
 
 // Everything needed to get Antigravity (agy) ready for MixSight:
 // find agy, register the bridge as MCP server "mixsight", allow its tools,
@@ -20,6 +21,15 @@ bool toolsAllowed (const juce::String& serverName);
 bool allowTools (const juce::String& serverName, juce::String& error);
 
 bool openSignInWindow (const juce::File& agy, const juce::File& workspace, juce::String& error);
+
+// Signed in to Antigravity = its token profile exists in the Windows Credential Manager
+// (generic credential "gemini:antigravity"; only its presence is checked, never its content).
+bool isSignedIn();
+
+// Opens the Antigravity window only if needed and closes it by itself as soon as the sign-in
+// is stored. Blocks up to timeoutSeconds. Returns true when signed in.
+bool signInAndWait (const juce::File& agy, const juce::File& workspace, int timeoutSeconds, juce::String& error,
+                    const std::function<bool()>& shouldStop = {});
 bool openAgyInstaller (juce::String& error);
 
 int runAndCapture (const juce::StringArray& args, const juce::File& cwd, juce::String& output);   // exit code

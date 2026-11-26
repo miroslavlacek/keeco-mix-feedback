@@ -46,7 +46,8 @@ public:
     bool allowTools (juce::String& error);           // adds the rule to agy's settings.json
     bool connectBridge (juce::String& log);          // agy mcp add mixsight <bridge>
     bool openSignIn (juce::String& error);           // visible agy window for Google sign-in
-    bool needsSignIn() const noexcept     { return signInNeeded.load(); }
+    bool needsSignIn() const;                        // after an auth error, or no stored sign-in (Windows)
+    bool isSigningIn() const noexcept     { return signInThread != nullptr && signInThread->isThreadRunning(); }
 
     static juce::File agyHome();                     // ~/.gemini
     static juce::String cleanMarkdown (const juce::String&);
@@ -82,6 +83,8 @@ private:
     std::atomic<bool> signInNeeded { false };
 
     std::unique_ptr<Worker> worker;
+    std::unique_ptr<juce::Thread> signInThread;
+    std::atomic<bool> signedInCached { true };
 
     JUCE_DECLARE_NON_COPYABLE (AiChat)
 };

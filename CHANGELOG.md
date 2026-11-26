@@ -1,5 +1,11 @@
 # Zmeny
 
+## 0.5.1
+- Prihlásenie do Gemini priamo v inštalátore: kto je prihlásený, nevidí žiadne okno; nový používateľ klikne
+  „Prihlásiť sa cez Google“ a okno Antigravity sa po prihlásení zavrie samo.
+- Plugin rozpozná, či si prihlásený, ešte pred prvou otázkou; prihlásenie z pluginu sa tiež zavrie samo.
+- Pod názvom „by Keeco“.
+
 ## 0.5.0
 - Nový názov: **MixSight** (predtým Keeco Mix Feedback). Uložené projekty plugin nájdu aj pod novým menom.
 - Inštalátor `MixSight-Setup.exe`: nainštaluje plugin, pripraví AI chat (Antigravity CLI) a ponúkne prihlásenie do Gemini.

@@ -10,8 +10,9 @@ vidí merania a vie si vypočuť takty, ktoré práve hrali.
    Windows môže ukázať modré okno „Systém Windows ochránil váš počítač“ – inštalátor nie je digitálne
    podpísaný. Klikni na **Ďalšie informácie → Spustiť aj tak**.
 2. Nechaj zaškrtnuté **Pripraviť AI chat** (stiahne Antigravity CLI od Googlu a pripojí ho k pluginu).
-3. Na konci nechaj zaškrtnuté **Prihlásiť sa do Gemini teraz**: otvorí sa okno Antigravity – vyber
-   **Login with Google** a prihlás sa v prehliadači svojím Google účtom. Potom v okne napíš `/quit`.
+3. Na stránke **Prihlásenie do Gemini** klikni **Prihlásiť sa cez Google**: otvorí sa okno Antigravity –
+   vyber **Login with Google** a prihlás sa v prehliadači. Okno sa po prihlásení zavrie samo.
+   (Ak si už prihlásený, inštalátor to len potvrdí.)
 4. Vo FL Studiu daj **Options → Manage plugins → Find plugins** (alebo reštartuj FL Studio)
    a vlož **MixSight** na master.
 
@@ -39,7 +40,7 @@ Keď je na GitHube nová verzia, v hlavičke pluginu sa objaví **Nová verzia X
 |---|---|
 | V AI chate tlačidlo **Nainštalovať Antigravity** | Klikni naň, počkaj na koniec inštalácie a potom **Pripojiť AI k pluginu**. |
 | Tlačidlo **Pripojiť AI k pluginu** | Klikni naň. |
-| **Prihlásiť sa cez Google** / chyba prihlásenia | Klikni, vyber Login with Google, prihlás sa a okno zavri príkazom `/quit`. |
+| **Prihlásiť sa cez Google** / chyba prihlásenia | Klikni, vyber Login with Google a prihlás sa – okno sa zavrie samo. |
 | Chceš iný Google účet | **Účet Google** → v okne napíš `/logout`, prihlás sa znova, `/quit`. |
 | AI dlho neodpovedá | Prvá odpoveď trvá 10–60 s, pri počúvaní dlhšie. Bezplatný účet má dennú kvótu. |
 | FL Studio plugin nevidí | Options → Manage plugins → Find plugins. |

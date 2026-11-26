@@ -827,8 +827,10 @@ void MixSightEditor::updateChatControls()
         case AiChat::SetupStep::signIn:     text = u8 ("Prihlásiť sa cez Google"); break;
         case AiChat::SetupStep::ready:      break;
     }
+    if (chat.isSigningIn()) text = u8 ("Čakám na prihlásenie…");
     const bool show = chatTab && text.isNotEmpty();
-    if (show) allowButton.setButtonText (text);
+    if (show && allowButton.getButtonText() != text) allowButton.setButtonText (text);
+    allowButton.setEnabled (! chat.isSigningIn());
     accountButton.setEnabled (chat.getAgyExecutable().existsAsFile());
     if (allowButton.isVisible() != show) { allowButton.setVisible (show); resized(); }
 }

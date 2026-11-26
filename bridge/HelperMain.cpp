@@ -1,7 +1,9 @@
 // MixSightHelper – small command-line helper used by the installer.
 //   MixSightHelper.exe --setup-ai    register MixSightBridge.exe in Antigravity as "mixsight"
 //                                    and allow its tools (removes the old "keeco-mix-feedback" entry)
-//   MixSightHelper.exe --sign-in     open Antigravity in a window for the Google sign-in
+//   MixSightHelper.exe --signed-in   exit code 0 = signed in, 1 = not signed in, 2 = Antigravity not installed
+//   MixSightHelper.exe --sign-in     if not signed in: open the Antigravity window, wait for the
+//                                    Google sign-in and close the window by itself (exit 0 = signed in)
 //   MixSightHelper.exe --status      print what is set up
 #include <juce_core/juce_core.h>
 #include <iostream>
@@ -25,6 +27,7 @@ int main (int argc, char** argv)
         say ("bridge:     " + bridge.getFullPathName() + (bridge.existsAsFile() ? "" : " (missing)"));
         say ("registered: " + (reg.name.isNotEmpty() ? reg.name + " -> " + reg.bridge.getFullPathName() : juce::String ("no")));
         say ("tools ok:   " + juce::String (aisetup::toolsAllowed (mixsight::serverName) ? "yes" : "no"));
+        say ("signed in:  " + juce::String (aisetup::isSignedIn() ? "yes" : "no"));
         return 0;
     }
     if (args.contains ("--setup-ai"))
@@ -38,12 +41,15 @@ int main (int argc, char** argv)
         say (ok && allowed ? "AI setup done." : "AI setup incomplete.");
         return ok && allowed ? 0 : 1;
     }
+    if (args.contains ("--signed-in"))
+        return ! agy.existsAsFile() ? 2 : (aisetup::isSignedIn() ? 0 : 1);
     if (args.contains ("--sign-in"))
     {
         juce::String err;
-        if (! aisetup::openSignInWindow (agy, here, err)) { say ("Cannot open Antigravity: " + err); return 1; }
-        return 0;
+        const bool ok = aisetup::signInAndWait (agy, here, 600, err);
+        if (! ok) say ("Not signed in: " + err);
+        return ok ? 0 : 1;
     }
-    say ("usage: MixSightHelper --setup-ai | --sign-in | --status");
+    say ("usage: MixSightHelper --setup-ai | --signed-in | --sign-in | --status");
     return 2;
 }

@@ -39,6 +39,7 @@ AiChat::AiChat() { refreshSetup(); }
 
 AiChat::~AiChat()
 {
+    if (signInThread != nullptr) signInThread->stopThread (3000);
     if (worker != nullptr) worker->cancel();
     worker.reset();
 }
@@ -62,7 +63,10 @@ void AiChat::refreshSetup()
     else if (reg.bridge.existsAsFile())     workspace = reg.bridge.getParentDirectory();
     else                                    workspace = juce::File();
     if (! bridgeExe.existsAsFile() && reg.bridge.existsAsFile()) bridgeExe = reg.bridge;
+    signedInCached = aisetup::isSignedIn();
 }
+
+bool AiChat::needsSignIn() const { return signInNeeded.load() || ! signedInCached; }
 
 juce::String AiChat::getSetupProblem() const
 {
@@ -78,7 +82,7 @@ AiChat::SetupStep AiChat::getSetupStep() const
     if (! agyExe.existsAsFile()) return SetupStep::installAgy;
     if (! registered || ! workspace.isDirectory()) return SetupStep::connect;
     if (! toolsAllowed()) return SetupStep::allowTools;
-    if (signInNeeded.load()) return SetupStep::signIn;
+    if (needsSignIn()) return SetupStep::signIn;
     return SetupStep::ready;
 }
 
@@ -98,15 +102,45 @@ bool AiChat::connectBridge (juce::String& log)
 bool AiChat::openSignIn (juce::String& error)
 {
     refreshSetup();
-    const bool ok = aisetup::openSignInWindow (agyExe, workspace.isDirectory() ? workspace : mixsight::appData(), error);
-    if (ok)
+    const auto ws = workspace.isDirectory() ? workspace : mixsight::appData();
+
+    if (! needsSignIn())
     {
-        signInNeeded = false;
-        addMessage (Message::Role::info,
-                    u8 ("Otvoril som okno Antigravity. Ak sa pýta na prihlásenie, vyber „Login with Google“ a dokonči ho v prehliadači. "
-                        "Iný účet: v okne napíš /logout a prihlás sa znova. Potom okno zavri príkazom /quit a pýtaj sa tu."));
+        // Already signed in: plain window for switching the account.
+        const bool ok = aisetup::openSignInWindow (agyExe, ws, error);
+        if (ok)
+            addMessage (Message::Role::info,
+                        u8 ("Si prihlásený. Na zmenu účtu v otvorenom okne napíš /logout, prihlás sa iným účtom a okno zavri príkazom /quit."));
+        return ok;
     }
-    return ok;
+    if (isSigningIn()) return true;
+
+    struct SignIn : juce::Thread
+    {
+        SignIn (AiChat& o, juce::File a, juce::File w) : juce::Thread ("MixSight sign-in"), owner (o), agy (a), ws (w) {}
+        void run() override
+        {
+            juce::String err;
+            const bool ok = aisetup::signInAndWait (agy, ws, 600, err, [this] { return threadShouldExit(); });
+            if (threadShouldExit()) return;
+            owner.signInNeeded = ! ok;
+            owner.signedInCached = ok;
+            owner.addMessage (ok ? Message::Role::info : Message::Role::error,
+                              ok ? u8 ("✓ Prihlásený do Gemini. Môžeš sa pýtať.")
+                                 : u8 ("Prihlásenie sa nedokončilo (") + err + u8 ("). Skús znova tlačidlom „Prihlásiť sa cez Google“."));
+            owner.setStatus ({});
+        }
+        AiChat& owner; juce::File agy, ws;
+    };
+
+    if (signInThread != nullptr) signInThread->stopThread (3000);
+    signInThread = std::make_unique<SignIn> (*this, agyExe, ws);
+    addMessage (Message::Role::info,
+                u8 ("Otvára sa okno Antigravity a prehliadač. V okne vyber „Login with Google“ a prihlás sa v prehliadači – "
+                    "okno sa po prihlásení zavrie samo."));
+    setStatus (u8 ("Čakám na prihlásenie…"));
+    signInThread->startThread();
+    return true;
 }
 
 // ---------------------------------------------------------------- state
