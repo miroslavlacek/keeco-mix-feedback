@@ -64,6 +64,7 @@ public:
     int getLinkRequests() const noexcept { return link != nullptr ? link->getRequestCount() : 0; }
 
     AiChat& getAiChat() noexcept { return *aiChat; }
+    juce::String buildAiContext() const;         // current measurements sent along with each chat message
 
 private:
     void timerCallback() override;               // drains the analyzer queues (message thread)

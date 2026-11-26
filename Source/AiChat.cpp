@@ -9,9 +9,11 @@ juce::String u8 (const char* s) { return juce::String::fromUTF8 (s); }
 const char* firstTurnPreamble =
     "[Správa z chatu v okne pluginu Keeco Mix Feedback na mastri vo FL Studiu. "
     "Používateľ robí minimal deep drum & bass. Na čísla používaj nástroje servera keeco-mix-feedback "
-    "(get_mix_status, get_sections, get_alerts); keď sa pýta na zvuk, vypočuj si takty cez capture_audio "
-    "a prečítaj vrátený WAV. Odpovedaj po slovensky, stručne, s číslami taktov. Nepíš tabuľky. "
-    "Najdôležitejší postreh môžeš zapísať do pluginu cez post_insight.]\n\n";
+    "Aktuálne merania (STATUS, SECTIONS, ALERTS) ti plugin posiela priamo v každej správe, takže "
+    "get_mix_status, get_sections ani get_alerts kvôli nim nevolaj a nečítaj schémy nástrojov. "
+    "Keď sa pýta na zvuk, groove alebo energiu, zavolaj capture_audio {from_bar, to_bar} a prečítaj vrátený WAV. "
+    "Odpovedaj po slovensky, stručne (do ~10 riadkov), s číslami taktov, bez tabuliek a nadpisov. "
+    "post_insight použi len pri vážnom probléme alebo keď o to používateľ požiada.]\n\n";
 }
 
 // ---------------------------------------------------------------- worker
@@ -217,7 +219,7 @@ void AiChat::cancel()
     if (w != nullptr) { w->cancel(); w.reset(); }
 }
 
-bool AiChat::send (const juce::String& text)
+bool AiChat::send (const juce::String& text, const juce::String& measurements)
 {
     if (text.trim().isEmpty() || isBusy()) return false;
     refreshSetup();
@@ -235,7 +237,11 @@ bool AiChat::send (const juce::String& text)
 
     const juce::ScopedLock sl (lock);
     const bool first = conversationId.isEmpty();
-    worker = std::make_unique<Worker> (*this, (first ? u8 (firstTurnPreamble) : juce::String()) + text.trim());
+    juce::String prompt = first ? u8 (firstTurnPreamble) : juce::String();
+    if (measurements.isNotEmpty())
+        prompt << u8 ("[Merania z pluginu práve teraz:]\n") << measurements << u8 ("\n[Koniec meraní]\n\n");
+    prompt << u8 ("Otázka používateľa: ") << text.trim();
+    worker = std::make_unique<Worker> (*this, prompt);
     aiMessageIndex = -1;
     status = u8 ("Premýšľam…");
     ++version;
@@ -244,6 +250,32 @@ bool AiChat::send (const juce::String& text)
 }
 
 // ---------------------------------------------------------------- one turn (worker thread)
+
+juce::String AiChat::describeTool (const juce::String& rawName, const juce::var& params)
+{
+    auto name = rawName.fromLastOccurrenceOf ("/", false, false);
+    // call_mcp_tool hides the real tool in its parameters; read_file has a path.
+    juce::String inner, path;
+    if (auto* o = params.getDynamicObject())
+        for (auto& kv : o->getProperties())
+        {
+            const auto key = kv.name.toString().toLowerCase();
+            const auto val = kv.value.toString();
+            if (key.contains ("path") || key.contains ("file")) path = val;
+            else if (key == "tool" || key == "tool_name" || key == "toolname" || key == "name") inner = val;
+        }
+    if (params.isString()) path = params.toString();
+    const auto all = (name + " " + inner + " " + path + " " + juce::JSON::toString (params, true)).toLowerCase();
+
+    if (all.contains ("capture_audio"))  return u8 ("Nahrávam takty…");
+    if (all.contains (".wav"))           return u8 ("Počúvam nahrávku…");
+    if (all.contains ("post_insight"))   return u8 ("Zapisujem postreh do pluginu…");
+    if (all.contains ("get_mix_status") || all.contains ("get_sections") || all.contains ("get_alerts"))
+        return u8 ("Čítam merania z pluginu…");
+    if (name.containsIgnoreCase ("read") || name.containsIgnoreCase ("view") || name.containsIgnoreCase ("list"))
+        return u8 ("Čítam podklady…");
+    return u8 ("Pracujem…");
+}
 
 juce::String AiChat::cleanMarkdown (const juce::String& s)
 {
@@ -295,16 +327,9 @@ void AiChat::handleLine (TurnState& st, const juce::String& rawLine)
         if (type == "tool")
         {
             auto name = p.getProperty ("tool_name", p.getProperty ("tool_info", {}).getProperty ("name", {})).toString();
-            if (name.contains ("/")) name = name.fromLastOccurrenceOf ("/", false, false);
-            if (name.isEmpty()) name = "tool";
-            if (st.toolStepsSeen.insert (idx).second)
-            {
-                st.lastToolStep = juce::jmax (st.lastToolStep, idx);
-                addMessage (Message::Role::tool, name);
-                { const juce::ScopedLock sl (lock); aiMessageIndex = -1; }   // text after a tool call starts a new bubble
-                setStatus (name == "capture_audio" ? u8 ("Nahrávam a počúvam takty…")
-                                                   : u8 ("Volám ") + name + u8 ("…"));
-            }
+            const auto params = p.getProperty ("tool_info", {}).getProperty ("parameters", p.getProperty ("parameters", {}));
+            st.toolStepsSeen.insert (idx);
+            setStatus (describeTool (name, params));
             const auto err = p.getProperty ("tool_info", {}).getProperty ("error", {});
             if (state == "DONE" && err.isObject())
                 addMessage (Message::Role::error, name + ": " + err.getProperty ("message", {}).toString());
@@ -319,7 +344,7 @@ void AiChat::handleLine (TurnState& st, const juce::String& rawLine)
             else acc += delta;
 
             juce::String all;
-            for (auto& kv : st.stepText) if (kv.first > st.lastToolStep && kv.second.isNotEmpty()) all += (all.isEmpty() ? "" : "\n\n") + kv.second;
+            for (auto& kv : st.stepText) if (kv.second.isNotEmpty()) all += (all.isEmpty() ? "" : "\n\n") + kv.second;
             if (all.isNotEmpty())
             {
                 setLastAiText (cleanMarkdown (all));

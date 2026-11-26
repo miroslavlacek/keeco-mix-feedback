@@ -59,13 +59,9 @@ int main (int argc, char** argv)
         c.handleLine (st, R"({"event":"step_update","step_index":2,"state":"ACTIVE","step_type":"agent_response","text_delta":"udrie."})");
         c.handleLine (st, R"({"event":"result","conversation_id":"x1","status":"SUCCESS","response":"Pozriem sa. Drop udrie."})");
         const auto msgs = c.getMessages();
-        CHECK (msgs.size() == 3);
-        if (msgs.size() == 3)
-        {
-            CHECK (msgs[0].role == AiChat::Message::Role::ai && msgs[0].text == "Pozriem sa.");
-            CHECK (msgs[1].role == AiChat::Message::Role::tool && msgs[1].text == "capture_audio");
-            CHECK (msgs[2].role == AiChat::Message::Role::ai && msgs[2].text == "Drop udrie.");
-        }
+        CHECK (msgs.size() == 1);                      // tool calls are not listed in the chat
+        if (msgs.size() == 1)
+            CHECK (msgs[0].role == AiChat::Message::Role::ai && msgs[0].text == "Pozriem sa.\n\nDrop udrie.");
         CHECK (st.conversationId == "x1" && st.status == "SUCCESS");
 
         AiChat::TurnState plain;                       // non-JSON output is shown as text
@@ -74,19 +70,33 @@ int main (int argc, char** argv)
         CHECK (allText (c2, AiChat::Message::Role::ai).contains ("Ahoj, toto je text."));
     }
 
+    // --- tool descriptions for the status line
+    {
+        juce::var params (new juce::DynamicObject());
+        params.getDynamicObject()->setProperty ("server", "keeco-mix-feedback");
+        params.getDynamicObject()->setProperty ("tool_name", "capture_audio");
+        CHECK (AiChat::describeTool ("call_mcp_tool", params).startsWith ("Nahr"));
+        juce::var rp (new juce::DynamicObject());
+        rp.getDynamicObject()->setProperty ("AbsolutePath", "C:/KeecoMixFeedback/captures/keeco_bars_33-48.wav");
+        CHECK (AiChat::describeTool ("read_file", rp).contains ("nahr"));
+        CHECK (AiChat::describeTool ("read_file", juce::var()).contains ("podklady"));
+        CHECK (AiChat::describeTool ("something", juce::var()).isNotEmpty());
+    }
+
     // --- full turn against the fake agy (process runner, quoting, conversation id)
     {
         AiChat c;
         CHECK (c.getSetupProblem().isEmpty());
         CHECK (c.getWorkspace() == ws);
         const auto prompt = juce::String::fromUTF8 ("Vypočuj si takty 33–48, \"drop\" C:\\cesta\\ ťažký bas");
-        CHECK (c.send (prompt));
+        CHECK (c.send (prompt, "STATUS {\"bar\": 40}"));
         CHECK (waitIdle (c));
         const auto ai = allText (c, AiChat::Message::Role::ai);
         std::cout << "AI reply: " << ai.toStdString();
         CHECK (ai.contains ("Drop je mono."));
-        CHECK (ai.contains (juce::String::fromUTF8 ("Dostal som: ") + prompt));
-        CHECK (allText (c, AiChat::Message::Role::tool).contains ("get_mix_status"));
+        CHECK (ai.contains (prompt));
+        CHECK (ai.contains (juce::String::fromUTF8 ("[merania: áno]")));
+        CHECK (allText (c, AiChat::Message::Role::tool).isEmpty());
         CHECK (allText (c, AiChat::Message::Role::error).isEmpty());
         CHECK (c.getConversationId() == "conv-1");
 

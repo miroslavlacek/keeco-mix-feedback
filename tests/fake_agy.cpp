@@ -57,7 +57,8 @@ int main (int argc, char** argv)
                  { "step_type", "agent_response" }, { "text_delta", "**Drop** je " } })));
     out (j (o ({ { "event", "step_update" }, { "conversation_id", conv }, { "step_index", 2 }, { "state", "ACTIVE" },
                  { "step_type", "agent_response" }, { "text_delta", "mono.\n" } })));
-    const auto last = prompt.fromLastOccurrenceOf ("\n", false, false);
+    const auto last = prompt.fromLastOccurrenceOf ("\n", false, false)
+                    + (prompt.contains ("STATUS {") ? juce::String::fromUTF8 (" [merania: áno]") : juce::String());
     out (j (o ({ { "event", "step_update" }, { "conversation_id", conv }, { "step_index", 2 }, { "state", "DONE" },
                  { "step_type", "agent_response" }, { "text_delta", "**Drop** je mono.\n* Dostal som: " + last } })));
     std::cerr << "info: 1 tool call\n";

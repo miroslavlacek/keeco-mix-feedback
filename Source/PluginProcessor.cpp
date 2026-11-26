@@ -266,6 +266,21 @@ juce::String KeecoMixFeedbackProcessor::statusJson() const
                   "Sub reads high by nature because K-weighting ignores it; judge bands against a reference." } }));
 }
 
+juce::String KeecoMixFeedbackProcessor::buildAiContext() const
+{
+    auto status = juce::JSON::parse (statusJson())["result"];
+    if (auto* o = status.getDynamicObject()) o->removeProperty ("note");
+
+    juce::StringArray alerts;
+    for (const auto& l : getLogNewestFirst (20))
+        alerts.add ((l.bar > 0 ? "t." + juce::String (l.bar) : juce::String ("-")) + " [" + severityName (l.severity)
+                    + (l.source == Source::ai ? ", AI" : "") + "] " + l.text);
+
+    return "STATUS " + juce::JSON::toString (status, true) + "\n"
+         + "SECTIONS (8 taktov) " + getSectionsJson() + "\n"
+         + "ALERTS (najnovšie prvé)\n" + (alerts.isEmpty() ? juce::String ("(žiadne)") : alerts.joinIntoString ("\n"));
+}
+
 juce::String KeecoMixFeedbackProcessor::handleLinkRequest (const juce::String& json)
 {
     const auto req = juce::JSON::parse (json);

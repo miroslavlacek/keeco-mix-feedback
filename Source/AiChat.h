@@ -23,7 +23,7 @@ public:
     AiChat();
     ~AiChat();
 
-    bool send (const juce::String& text);           // false if a reply is still running
+    bool send (const juce::String& text, const juce::String& measurements = {});   // false if busy
     void cancel();
     void newConversation();
 
@@ -44,6 +44,7 @@ public:
 
     static juce::File agyHome();                     // ~/.gemini
     static juce::String cleanMarkdown (const juce::String&);
+    static juce::String describeTool (const juce::String& name, const juce::var& parameters);
 
     // stream-json parsing (public for tests)
     struct TurnState

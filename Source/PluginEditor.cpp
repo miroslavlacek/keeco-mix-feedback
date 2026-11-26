@@ -646,7 +646,7 @@ void KeecoMixFeedbackEditor::sendChat()
     auto& chat = proc.getAiChat();
     const auto text = chatInput.getText().trim();
     if (text.isEmpty() || chat.isBusy()) return;
-    chat.send (text);
+    chat.send (text, proc.buildAiContext());
     chatInput.setText ({}, juce::dontSendNotification);
     chatInput.repaint();
     refreshChatView (true);
