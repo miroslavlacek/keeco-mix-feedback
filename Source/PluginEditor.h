@@ -12,6 +12,7 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    void mouseMove (const juce::MouseEvent&) override;
 
 private:
     void timerCallback() override;
@@ -24,6 +25,8 @@ private:
     void paintBands (juce::Graphics&, juce::Rectangle<int>);
     void paintAlerts (juce::Graphics&, juce::Rectangle<int>);
     void paintChat (juce::Graphics&, juce::Rectangle<int>);
+    void paintHelp (juce::Graphics&, juce::Rectangle<int>);
+    void addZone (juce::Rectangle<int> r, int key) { helpZones.push_back ({ r, key }); }
     void showTab (bool chat);
     void sendChat();
     void refreshChatView (bool force);
@@ -54,6 +57,12 @@ private:
     juce::TextButton learnButton { juce::String::fromUTF8 ("Naučiť referenciu") };
     juce::TextButton copyButton  { juce::String::fromUTF8 ("Kopírovať súhrny (JSON)") };
     juce::TextButton clearButton { juce::String::fromUTF8 ("Vymazať") };
+
+    // Beginner explanations shown in the left-bottom panel for whatever is under the mouse.
+    struct HelpZone { juce::Rectangle<int> area; int key; };
+    std::vector<HelpZone> helpZones;          // rebuilt on every paint
+    int hoverHelp = -1;
+    juce::Rectangle<int> helpArea;
 
     // AI chat (Antigravity)
     bool chatTab = false;

@@ -60,7 +60,7 @@ int main (int argc, char** argv)
     proc->prepareToPlay (48000, 512);
 
     std::unique_ptr<juce::AudioProcessorEditor> ed (proc->createEditorAndMakeActive());
-    ed->setSize (1180, 760);
+    ed->setSize (1180, 880);
     juce::MidiBuffer midi; juce::AudioBuffer<float> buf (2, 512); Synth syn;
 
     auto play = [&] (double seconds, int mix, double startBar)
@@ -113,6 +113,21 @@ int main (int argc, char** argv)
         input->onReturnKey();
         std::printf ("input after send: [%s]\n", input->getText().toRawUTF8());
         for (int i = 0; i < 200; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+    }
+
+    // 5. Optionally hover a point (KMF_HARNESS_HOVER="x,y") to show the help panel.
+    const auto hover = juce::StringArray::fromTokens (juce::SystemStats::getEnvironmentVariable ("KMF_HARNESS_HOVER", {}), ",", {});
+    if (hover.size() == 2)
+    {
+        const juce::Point<float> pt (hover[0].getFloatValue(), hover[1].getFloatValue());
+        auto* target = ed->getComponentAt (pt.toInt());
+        if (target == nullptr) target = ed.get();
+        const juce::MouseEvent ev (juce::Desktop::getInstance().getMainMouseSource(), ed->getLocalPoint (nullptr, ed->localPointToGlobal (pt)),
+                                   {}, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, ed.get(), ed.get(), juce::Time::getCurrentTime(),
+                                   pt, juce::Time::getCurrentTime(), 0, false);
+        ed->createComponentSnapshot (ed->getLocalBounds());          // paint once so the help zones exist
+        ed->mouseMove (ev);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (100);
     }
 
     const auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);

@@ -62,6 +62,56 @@ void drawBar (juce::Graphics& g, juce::Rectangle<int> r, float fraction, juce::C
     g.setColour (c); g.fillRoundedRectangle (r.toFloat().withWidth (r.getWidth() * juce::jlimit (0.0f, 1.0f, fraction)), 4.0f);
 }
 
+// ---- beginner explanations (left-bottom panel)
+enum HelpKey
+{
+    hStatus, hShort, hMomentary, hIntegrated, hTruePeak, hLra, hHistory,
+    hPlr, hPsr, hCorrelation, hWidth, hBassMono,
+    hSpectrum, hLegendAvg, hLegendLive, hLegendPeak, hLegendRef, hSpecMode,
+    hBandSub, hBandBass, hBandLowMid, hBandMid, hBandHigh,
+    hMode, hReference, hRefName, hLearn, hClear, hTabs, hCopy, hAllow, hNewChat, hChat,
+    hNumKeys
+};
+
+struct HelpText { const char* title; const char* body; };
+
+const HelpText helpTexts[hNumKeys] =
+{
+    { "Stav prehrávania", "Či DAW hrá, aktuálny takt a čas. Meranie sa začína vždy znova od miesta, kde spustíš prehrávanie – hodnoty platia len pre toto prehrávanie." },
+    { "Short-term (LUFS)", "Ako hlasno track znie za posledné 3 sekundy, tak ako to vníma ucho. Čím bližšie k 0, tým hlasnejšie. Premaster býva v drope okolo -14 až -10, hotový DnB master okolo -8 až -6." },
+    { "Momentary", "Hlasitosť za posledných 0,4 sekundy. Skáče s každým úderom – vidíš na ňom jednotlivé údery, na celkové hodnotenie slúži short-term a integrated." },
+    { "Integrated", "Priemerná hlasitosť od spustenia (úplné ticho sa nepočíta). Toto číslo porovnávajú streamovacie služby – Spotify či YouTube hlasnejšie tracky stišujú." },
+    { "True peak max (dBTP)", "Najvyšší skutočný vrchol signálu od spustenia, aj medzi vzorkami. Nad 0 hrozí skreslenie v MP3 alebo v reproduktoroch. Premaster drž pod -1 dBTP, nech má mastering rezervu." },
+    { "LRA (rozsah hlasitosti)", "O koľko sa líšia tiché a hlasné časti tracku – napríklad intro oproti dropu. Malé číslo = track je stále rovnako hlasný, veľké = výrazné rozdiely medzi časťami." },
+    { "Graf hlasitosti", "Short-term hlasitosť od spustenia prehrávania. Vidíš, kde track zosilnie (drop) a kde zoslabne (breakdown), a či sú dropy rovnako hlasné." },
+    { "PLR", "Rozdiel medzi najvyšším vrcholom a priemernou hlasitosťou celého prehrávania. Viac dB = údery majú priestor (dynamika), málo dB = mix je silno stlačený." },
+    { "PSR", "To isté ako PLR, ale za posledné 3 sekundy. Pod ~6 dB znie mix stlačene a údery strácajú punch. V premastri je dobré mať aspoň ~8 dB." },
+    { "Korelácia", "Nakoľko sú ľavý a pravý kanál rovnaké. +1 = mono, okolo 0 = veľmi široké, pod 0 = kanály idú proti sebe a v mone (klub, mobil) sa časť zvuku vyruší." },
+    { "Šírka", "Koľko energie je v bokoch (rozdiel ľavého a pravého kanála). 0 % = úplne mono, približne 20–50 % je bežné stereo, veľmi vysoké hodnoty sú citlivé na prehrávanie v mone." },
+    { "Bas pod 120 Hz", "Či sú najnižšie basy rovnaké v oboch kanáloch. Klubové aparatúry hrajú sub často mono – stereo bas tam môže zoslabnúť alebo sa rozmazať. Má svietiť „mono OK“." },
+    { "Spektrum", "Ako je energia rozložená od basov (vľavo) po výšky (vpravo). Krivka je naklonená o 4,5 dB na oktávu, aby vyvážený mix vyzeral približne vodorovne." },
+    { "Priemer od spustenia", "Priemerné spektrum celého prehrávania (hrubá oranžová čiara). Podľa neho posudzuj vyváženie basov, stredov a výšok." },
+    { "Živé", "Spektrum práve v tejto chvíli. Rýchlo sa mení s hudbou – hodí sa na sledovanie jednotlivých zvukov." },
+    { "Peak hold", "Najvyššia úroveň, ktorú každá frekvencia dosiahla od spustenia. Ukáže rezonancie a piskľavé miesta, ktoré v priemere zaniknú." },
+    { "Referencia (prerušovaná čiara)", "Spektrum referenčného tracku zrovnané na rovnakú hlasitosť. Kde je tvoja krivka nad ňou, máš tých frekvencií viac ako referencia; kde je pod ňou, menej." },
+    { "Stereo / Mid / Side", "Stereo = celý signál. Mid = stred, čo je rovnaké vľavo aj vpravo (kick, bas, vokál). Side = boky, rozdiel kanálov (šírka, reverby, pady)." },
+    { "Sub 20–60 Hz", "Najhlbší bas, ktorý v klube skôr cítiš, ako počuješ. Bez referencie je číslo úroveň pásma voči celkovej hlasitosti; s referenciou rozdiel oproti nej (+ = viac)." },
+    { "Bas 60–250 Hz", "Telo kicku a basu. Veľa = mix duní, málo = chýba váha. S referenciou ukazuje rozdiel oproti nej (+ = viac ako referencia)." },
+    { "Nízke stredy 250–500 Hz", "Oblasť, kde mix najľahšie zahustne („bahno“). Priveľa = zahltené a nejasné, primálo = tenké. S referenciou ukazuje rozdiel oproti nej." },
+    { "Stredy 0,5–4 kHz", "Väčšina nástrojov, snare a vokály; tu je ucho najcitlivejšie. Priveľa = tvrdé a unavujúce, primálo = zvuk je vzadu." },
+    { "Výšky 4 kHz+", "Hi-haty, vzduch a iskra. Primálo = tupé, priveľa = ostré a syčivé. V intre bez hi-hatov je prirodzene nízko." },
+    { "Premaster / Master", "Premaster = mix pôjde ešte na mastering: plugin hlasitosť nehodnotí, sleduje rezervu a dynamiku. Master = hotový track, posudzuje aj hlasitosť." },
+    { "Referencia", "Vyber uložený referenčný track. Plugin potom porovnáva pásma a spektrum tvojho mixu s ním – najistejší spôsob, ako posúdiť vyváženie." },
+    { "Názov referencie", "Sem napíš názov, pod ktorým sa nová referencia uloží (napr. meno tracku). Ak necháš prázdne, použije sa dátum." },
+    { "Naučiť referenciu", "Daj na master hotový track, ktorý sa ti páči, stlač tlačidlo, pusti ho aspoň 30 s (ideálne drop) a stlač „Ukončiť a uložiť“. Plugin si zapamätá jeho vyváženie." },
+    { "Vymazať", "Vymaže postrehy a súhrny úsekov v okne pluginu. Merania bežia ďalej." },
+    { "Postrehy / AI chat", "Postrehy = upozornenia pluginu s číslom taktu. AI chat = otázky pre Gemini, ktoré vidí merania a vie si vypočuť takty, ktoré práve hrali." },
+    { "Kopírovať súhrny", "Skopíruje štatistiky po 8 taktoch (JSON) do schránky, aby si ich mohol vložiť do iného chatu s AI." },
+    { "Povoliť nástroje pluginu", "Jedným klikom povolí Antigravity nástroje tohto pluginu, aby sa nepýtal na potvrdenie pri každom kroku." },
+    { "Nový rozhovor", "Začne nový rozhovor s AI – zabudne predchádzajúce otázky. Hodí sa pri inom tracku." },
+    { "AI chat", "Napíš otázku a stlač Enter. AI dostane aktuálne merania, pri otázkach na zvuk si nahrá a vypočuje takty. Počúvať sa dajú len takty, ktoré v tomto prehrávaní zazneli." },
+};
+
 juce::Colour severityColour (kmf::Severity s)
 {
     return s == kmf::Severity::problem ? col::bad : s == kmf::Severity::warning ? col::warn : col::ref;
@@ -171,8 +221,9 @@ KeecoMixFeedbackEditor::KeecoMixFeedbackEditor (KeecoMixFeedbackProcessor& p)
         c->setVisible (false);
 
     setResizable (true, true);
-    setResizeLimits (980, 640, 2000, 1400);
-    setSize (1180, 760);
+    setResizeLimits (980, 760, 2000, 1400);
+    setSize (1180, 880);
+    addMouseListener (this, true);          // hover help also over buttons and text fields
     lastTick = juce::Time::getMillisecondCounterHiRes() * 0.001;
     startTimerHz (30);
 }
@@ -289,13 +340,18 @@ void KeecoMixFeedbackEditor::resized()
 
     auto left = r.removeFromLeft (300);
     r.removeFromLeft (16);
-    loudArea   = left.removeFromTop (juce::jmin (290, left.getHeight() / 2)); left.removeFromTop (12);
-    dynArea    = left.removeFromTop (150);                                    left.removeFromTop (12);
-    stereoArea = left.removeFromTop (juce::jmin (150, left.getHeight()));
 
-    auto top = r.removeFromTop ((int) (r.getHeight() * (chatTab ? 0.42f : 0.62f)));
+    // Left column lines up with the right one: loudness = spectrum height,
+    // dynamics starts with the insights/chat panel, help fills down to its bottom.
+    const int topH = juce::jmax (260, (int) (r.getHeight() * 0.44f));
+    auto top = r.removeFromTop (topH);
     r.removeFromTop (12);
     alertsArea = r;
+
+    loudArea   = left.removeFromTop (topH);  left.removeFromTop (12);
+    dynArea    = left.removeFromTop (144);   left.removeFromTop (12);
+    stereoArea = left.removeFromTop (138);   left.removeFromTop (12);
+    helpArea   = left;
 
     spectrumArea = top;
     auto spIn = top.reduced (16, 12);
@@ -333,6 +389,15 @@ void KeecoMixFeedbackEditor::resized()
 void KeecoMixFeedbackEditor::paint (juce::Graphics& g)
 {
     g.fillAll (col::bg);
+    helpZones.clear();
+    auto zoneOf = [this] (juce::Component& c, int key) { if (c.isVisible()) addZone (c.getBounds(), key); };
+    zoneOf (modeBox, hMode); zoneOf (referenceBox, hReference); zoneOf (referenceName, hRefName);
+    zoneOf (learnButton, hLearn); zoneOf (clearButton, hClear);
+    zoneOf (modeStereo, hSpecMode); zoneOf (modeMid, hSpecMode); zoneOf (modeSide, hSpecMode);
+    zoneOf (tabInsights, hTabs); zoneOf (tabChat, hTabs); zoneOf (copyButton, hCopy);
+    zoneOf (allowButton, hAllow); zoneOf (newChatButton, hNewChat);
+    zoneOf (chatView, hChat); zoneOf (chatInput, hChat); zoneOf (sendButton, hChat);
+
     paintHeader (g, headerArea);
     paintLoudness (g, loudArea);
     paintDynamics (g, dynArea);
@@ -340,6 +405,42 @@ void KeecoMixFeedbackEditor::paint (juce::Graphics& g)
     paintSpectrum (g, spectrumArea);
     paintBands (g, bandsArea);
     if (chatTab) paintChat (g, alertsArea); else paintAlerts (g, alertsArea);
+    paintHelp (g, helpArea);
+}
+
+void KeecoMixFeedbackEditor::mouseMove (const juce::MouseEvent& e)
+{
+    const auto pos = e.getEventRelativeTo (this).getPosition();
+    for (auto it = helpZones.rbegin(); it != helpZones.rend(); ++it)
+        if (it->area.contains (pos))
+        {
+            if (hoverHelp != it->key) { hoverHelp = it->key; repaint (helpArea); }
+            return;
+        }
+}
+
+void KeecoMixFeedbackEditor::paintHelp (juce::Graphics& g, juce::Rectangle<int> r)
+{
+    if (r.getHeight() < 48) return;
+    drawPanel (g, r, {});
+    auto in = r.reduced (14, 12);
+
+    juce::AttributedString as;
+    as.setWordWrap (juce::AttributedString::byWord);
+    if (hoverHelp >= 0 && hoverHelp < hNumKeys)
+    {
+        as.append (u8 (helpTexts[hoverHelp].title) + "\n", uiFont (13.0f, true), col::accent);
+        as.append (u8 (helpTexts[hoverHelp].body), uiFont (12.0f), col::text);
+    }
+    else
+        as.append (u8 ("Prejdi myšou na ľubovoľný údaj, graf alebo tlačidlo – tu sa zobrazí, čo znamená."),
+                   uiFont (12.0f), col::muted);
+    juce::TextLayout layout;
+    layout.createLayout (as, (float) in.getWidth());
+    g.saveState();
+    g.reduceClipRegion (in);
+    layout.draw (g, in.toFloat());
+    g.restoreState();
 }
 
 void KeecoMixFeedbackEditor::paintHeader (juce::Graphics& g, juce::Rectangle<int> r)
@@ -362,6 +463,7 @@ void KeecoMixFeedbackEditor::paintHeader (juce::Graphics& g, juce::Rectangle<int
 
     // Status pill
     auto pill = in.removeFromLeft (240).withSizeKeepingCentre (240, 28);
+    addZone (pill, hStatus);
     const bool on = m.playing;
     g.setColour (learning ? juce::Colour (0xff12283a) : on ? juce::Colour (0xff1e2a1f) : col::tile);
     g.fillRoundedRectangle (pill.toFloat(), 14.0f);
@@ -380,6 +482,7 @@ void KeecoMixFeedbackEditor::paintLoudness (juce::Graphics& g, juce::Rectangle<i
     auto in = r.reduced (16, 12); in.removeFromTop (22);
 
     auto big = in.removeFromTop (38);
+    addZone (big, hShort);
     g.setColour (col::muted); g.setFont (uiFont (13.0f));
     g.drawText ("Short-term", big, juce::Justification::centredLeft);
     g.setColour (col::text); g.setFont (monoFont (30.0f, true));
@@ -389,6 +492,8 @@ void KeecoMixFeedbackEditor::paintLoudness (juce::Graphics& g, juce::Rectangle<i
     auto row1 = in.removeFromTop (48); in.removeFromTop (8);
     auto row2 = in.removeFromTop (48); in.removeFromTop (10);
     const int w = (row1.getWidth() - 8) / 2;
+    addZone (row1.withWidth (w), hMomentary); addZone (row1.withTrimmedLeft (w + 8), hIntegrated);
+    addZone (row2.withWidth (w), hTruePeak);  addZone (row2.withTrimmedLeft (w + 8), hLra);
     drawTile (g, row1.removeFromLeft (w), "Momentary", fmt (m.momentary), col::text);  row1.removeFromLeft (8);
     drawTile (g, row1, "Integrated", fmt (m.integrated), col::text);
     const auto tpColour = m.truePeakMaxDb > 0.0 ? col::bad : m.truePeakMaxDb > -1.0 ? col::warn : col::text;
@@ -397,6 +502,7 @@ void KeecoMixFeedbackEditor::paintLoudness (juce::Graphics& g, juce::Rectangle<i
 
     // Short-term history since playback start.
     auto plot = in.withHeight (juce::jmax (40, in.getHeight()));
+    addZone (plot, hHistory);
     g.setColour (col::plot); g.fillRoundedRectangle (plot.toFloat(), 4.0f);
     if (history.size() > 1)
     {
@@ -423,8 +529,9 @@ void KeecoMixFeedbackEditor::paintDynamics (juce::Graphics& g, juce::Rectangle<i
     auto in = r.reduced (16, 12); in.removeFromTop (24);
     g.setFont (uiFont (12.0f));
 
-    auto line = [&] (const juce::String& label, double v, juce::Colour c)
+    auto line = [&] (const juce::String& label, double v, juce::Colour c, int key)
     {
+        addZone (in.withHeight (40), key);
         auto row = in.removeFromTop (18);
         g.setColour (col::muted); g.drawText (label, row, juce::Justification::centredLeft);
         g.setColour (c); g.setFont (monoFont (12.5f));
@@ -434,8 +541,8 @@ void KeecoMixFeedbackEditor::paintDynamics (juce::Graphics& g, juce::Rectangle<i
         drawBar (g, in.removeFromTop (8), (float) (v / 15.0), c);
         in.removeFromTop (10);
     };
-    line (u8 ("PLR (celé prehrávanie)"), m.plrDb, col::ref);
-    line (u8 ("PSR (posledné 3 s)"), m.psrDb, m.psrDb > 0 && m.psrDb < 6.0 ? col::warn : col::ref);
+    line (u8 ("PLR (celé prehrávanie)"), m.plrDb, col::ref, hPlr);
+    line (u8 ("PSR (posledné 3 s)"), m.psrDb, m.psrDb > 0 && m.psrDb < 6.0 ? col::warn : col::ref, hPsr);
 
     g.setColour (col::faint); g.setFont (uiFont (11.0f));
     const auto refText = proc.hasReference()
@@ -450,6 +557,9 @@ void KeecoMixFeedbackEditor::paintStereo (juce::Graphics& g, juce::Rectangle<int
     auto in = r.reduced (16, 12); in.removeFromTop (24);
     g.setFont (uiFont (12.0f));
 
+    addZone (in.withHeight (42), hCorrelation);
+    addZone (in.withTrimmedTop (42).withHeight (26), hWidth);
+    addZone (in.withTrimmedTop (68).withHeight (24), hBassMono);
     auto row = in.removeFromTop (18);
     g.setColour (col::muted); g.drawText (u8 ("Korelácia"), row, juce::Justification::centredLeft);
     g.setColour (col::text); g.setFont (monoFont (12.5f)); g.drawText (fmt (m.correlation, 2, true), row, juce::Justification::centredRight);
@@ -486,6 +596,7 @@ void KeecoMixFeedbackEditor::paintSpectrum (juce::Graphics& g, juce::Rectangle<i
     auto legend = in.removeFromBottom (18); in.removeFromBottom (6);
     auto plot = in;
 
+    addZone (plot, hSpectrum);
     g.setColour (col::plot); g.fillRect (plot);
     const double fMin = kmf::SpectrumAnalyzer::minHz, fMax = kmf::SpectrumAnalyzer::maxHz;
     const float dbTop = -10.0f, dbBottom = -100.0f;
@@ -537,18 +648,19 @@ void KeecoMixFeedbackEditor::paintSpectrum (juce::Graphics& g, juce::Rectangle<i
     g.setColour (col::accent); g.strokePath (curve (spectrum.getAverage()), juce::PathStrokeType (2.4f));
 
     g.setFont (uiFont (11.5f)); g.setColour (col::muted);
-    auto item = [&] (juce::Colour c, const juce::String& t, bool dashedLine)
+    auto item = [&] (juce::Colour c, const juce::String& t, bool dashedLine, int key)
     {
         auto a = legend.removeFromLeft (170);
+        addZone (a, key);
         auto sw = a.removeFromLeft (18).withSizeKeepingCentre (16, 2);
         g.setColour (c);
         if (dashedLine) { g.fillRect (sw.withWidth (6)); g.fillRect (sw.withTrimmedLeft (10)); } else g.fillRect (sw);
         a.removeFromLeft (6); g.setColour (col::muted); g.drawText (t, a, juce::Justification::centredLeft);
     };
-    item (col::accent, u8 ("Priemer od spustenia"), false);
-    item (col::accent.withAlpha (0.45f), u8 ("Živé"), false);
-    item (col::text.withAlpha (0.35f), "Peak hold", false);
-    if (proc.hasReference()) item (col::ref, juce::String::fromUTF8 (proc.getReference().profile.name.c_str()), true);
+    item (col::accent, u8 ("Priemer od spustenia"), false, hLegendAvg);
+    item (col::accent.withAlpha (0.45f), u8 ("Živé"), false, hLegendLive);
+    item (col::text.withAlpha (0.35f), "Peak hold", false, hLegendPeak);
+    if (proc.hasReference()) item (col::ref, juce::String::fromUTF8 (proc.getReference().profile.name.c_str()), true, hLegendRef);
 }
 
 void KeecoMixFeedbackEditor::paintBands (juce::Graphics& g, juce::Rectangle<int> r)
@@ -559,6 +671,7 @@ void KeecoMixFeedbackEditor::paintBands (juce::Graphics& g, juce::Rectangle<int>
     for (int i = 0; i < n; ++i)
     {
         auto tile = r.removeFromLeft (w); r.removeFromLeft (gap);
+        addZone (tile, hBandSub + i);
         const double v = hasRef ? m.deltaDb[(size_t) i] : m.balanceDb[(size_t) i];
         juce::Colour c = col::text;
         if (hasRef) c = std::abs (v) >= 3.0 ? col::warn : std::abs (v) >= 1.5 ? col::text : col::good;
